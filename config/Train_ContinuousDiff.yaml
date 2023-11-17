@@ -1,0 +1,34 @@
+DATASET:
+  BATCH_SIZE: 64
+  RLBENCH:
+    TASK_NAME: 'StackBlocks' # PickUpCup ReachTarget PushButton OpenWineBottle CloseBox PutRubbishInBin StackWine PlaceHangerOnRack WaterPlants BeatTheBuzz PutKnifeOnChoppingBoard TakePlateOffColoredDishRack StraightenRope PutUmbrellaInUmbrellaStand ScoopWithSpatula StackBlocks
+    PATH: '../dataset/RLBench'
+OUTPUT:
+  LOG_ITER: 100
+  EVAL_ITER: 10000
+  MAX_ITER: 50000
+  SAVE_ITER: 10000
+  BASE_DIR: "../weights"
+OPTIM:
+  LR: 1e-4
+  SCHEDULER:
+    GAMMA: 0.99
+    STEP: 5000
+MODEL:
+  NAME: "Convnext-UNet" # resnet18 vit_base_patch16_224 Convnext-UNet Convnext-UNet-avgpool Convnext-UNet-avgpool
+  QUERY_EMB_DIM: 128
+  INOUT: "m"
+  TARGET: "noise" # noise gt_motion
+SDE:
+  NAME: "vpsde"
+  N: 1000
+  VPSDES:
+    BETA_MIN: 0.01
+    BETA_MAX: 2.
+  VESDES:
+    SIGMA_MIN: 0.01
+    SIGMA_MAX: 2.0
+  TRAINING:
+    CONTINUOUS: True
+RETRIEVAL:
+  RANK: 3

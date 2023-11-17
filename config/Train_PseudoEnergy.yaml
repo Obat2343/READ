@@ -1,0 +1,25 @@
+DATASET:
+  BATCH_SIZE: 64
+  RLBENCH:
+    TASK_NAME: 'ReachTarget' # PickUpCup ReachTarget PushButton OpenWineBottle CloseBox PutRubbishInBin StackWine PlaceHangerOnRack WaterPlants BeatTheBuzz PutKnifeOnChoppingBoard TakePlateOffColoredDishRack StraightenRope PutUmbrellaInUmbrellaStand ScoopWithSpatula StackBlocks
+    PATH: '../dataset/RLBench'
+OUTPUT:
+  LOG_ITER: 100
+  EVAL_ITER: 10000
+  MAX_ITER: 50000
+  SAVE_ITER: 10000
+  BASE_DIR: "../weights"
+OPTIM:
+  LR: 1e-4
+  SCHEDULER:
+    GAMMA: 0.99
+    STEP: 5000
+MODEL:
+  QUERY_EMB_DIM: 128
+SDE:
+  N: 1000
+  VPSDES:
+    BETA_MIN: 1.
+    BETA_MAX: 20.
+  TRAINING:
+    CONTINUOUS: False

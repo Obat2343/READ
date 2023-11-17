@@ -1,0 +1,11 @@
+__pycache__
+/env
+/dataset
+/output
+/git
+/jupyter
+/result
+/hoge
+/global_result
+/weights
+/prepare_dataset

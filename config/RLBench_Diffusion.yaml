@@ -1,0 +1,29 @@
+DATASET:
+  BATCH_SIZE: 64
+  RLBENCH:
+    TASK_NAME: 'PickUpCup' # PickUpCup ReachTarget PushButton OpenWineBottle CloseBox PutRubbishInBin StackWine PlaceHangerOnRack WaterPlants BeatTheBuzz PutKnifeOnChoppingBoard TakePlateOffColoredDishRack StraightenRope PutUmbrellaInUmbrellaStand ScoopWithSpatula StackBlocks
+    PATH: '../dataset/RLBench'
+OUTPUT:
+  LOG_ITER: 100
+  EVAL_ITER: 10000
+  MAX_ITER: 50000
+  SAVE_ITER: 10000
+  BASE_DIR: "../weights"
+OPTIM:
+  LR: 1e-4
+  SCHEDULER:
+    GAMMA: 0.99
+    STEP: 5000
+MODEL:
+  QUERY_EMB_DIM: 128
+DIFFUSION:
+  TYPE: "normal" # normal improved
+  STEP: 1000
+  START: 1e-5
+  END: 0. # 0. means auto
+  MAX_RANK: 1
+  SIGMA: 2.0
+  TARGET_MODE: "max"
+  S: 8e-3
+  BIAS: 1.0 # 1.0 means auto
+  IMG_GUIDE: 1.0 # default 1.0

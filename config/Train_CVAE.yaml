@@ -1,0 +1,21 @@
+DATASET:
+  BATCH_SIZE: 64
+  RLBENCH:
+    TASK_NAME: 'StackBlocks' # PickUpCup ReachTarget PushButton OpenWineBottle CloseBox PutRubbishInBin StackWine PlaceHangerOnRack WaterPlants BeatTheBuzz PutKnifeOnChoppingBoard TakePlateOffColoredDishRack StraightenRope PutUmbrellaInUmbrellaStand ScoopWithSpatula StackBlocks
+    PATH: '../dataset/RLBench'
+OUTPUT:
+  LOG_ITER: 100
+  EVAL_ITER: 10000
+  MAX_ITER: 30000
+  SAVE_ITER: 10000
+  BASE_DIR: "../weights"
+OPTIM:
+  LR: 1e-4
+  SCHEDULER:
+    GAMMA: 0.99
+    STEP: 5000
+MODEL:
+  NAME: "resnet18_mlp" # resnet18 Convnext-UNet resnet18_mlp
+VAE:
+  LATENT_DIM: 128
+  KLD_WEIGHT: 0.1

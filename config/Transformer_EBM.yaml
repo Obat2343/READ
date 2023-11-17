@@ -1,0 +1,29 @@
+DATASET:
+  BATCH_SIZE: 32
+  RLBENCH:
+    TASK_NAME: 'hoge' # PickUpCup PutKnifeOnChoppingBoard PutRubbishInBin StackWine StackBlocks TakePlateOffColoredDishRack ReachTarget PushButton CloseBox PutUmbrellaInUmbrellaStand ScoopWithSpatula
+    PATH: '../dataset/RLBench'
+OUTPUT:
+  LOG_ITER: 100
+  EVAL_ITER: 10000
+  MAX_ITER: 50000
+  SAVE_ITER: 10000
+  BASE_DIR: "../weights"
+MODEL:
+  EXTRACTOR_NAME: "query_uv_feature" # query_uv_feature
+  PREDICTOR_NAME: "EBM_Transformer_with_cat_feature" # EBM_Transformer_with_img_and_pose_feature, EBM_Transformer_with_cat_feature
+SAMPLING:
+  NUM_NEGATIVE: 63
+  FIRST_SAMPLE: "vae_and_random" # random_range, random_pick, random_pick_with_noise, vae_sample, vae_noise, vae_and_random, vae_sample_and_random
+  SECOND_SAMPLE: "none" # none, langevin, langevin_vae, langevin_vae_train, sgd, DFO
+  INF_SAMPLE: "sort" # sort, sgd, DMO, DMO_once, DMO_keep
+  VAE:
+    NOISE_STD: 2.0
+VAE:
+  NAME: "Transformer_VAE"
+  LATENT_DIM: 256
+OPTIM:
+  LR: 1e-4
+  SCHEDULER:
+    GAMMA: 0.99
+    STEP: 5000

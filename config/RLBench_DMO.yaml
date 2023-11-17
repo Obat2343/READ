@@ -1,0 +1,25 @@
+DATASET:
+  BATCH_SIZE: 16
+  RLBENCH:
+    TASK_NAME: 'hoge' # PickUpCup PutKnifeOnChoppingBoard PutRubbishInBin StackWine TakePlateOffColoredDishRack, ReachTarget, PushButton, CloseBox, PutUmbrellaInUmbrellaStand
+    PATH: '../dataset/RLBench'
+OUTPUT:
+  LOG_ITER: 100
+  EVAL_ITER: 10000
+  MAX_ITER: 100000
+  SAVE_ITER: 10000
+  BASE_DIR: "../global_result"
+MODEL:
+  EXTRACTOR_NAME: "query_uv_feature" # query_uv_feature, gap
+  PREDICTOR_NAME: "Regressor_Transformer_with_cat_feature" # Regressor_Transformer_with_cat_feature, Regressor_Transformer_with_img_and_pose_feature
+OPTIM:
+  LR: 1e-4
+  SCHEDULER:
+    GAMMA: 0.99
+    STEP: 5000
+NOISE:
+  METHOD: "vae" #gaussian vae
+VAE:
+  NAME: "Transformer_VAE"
+  LATENT_DIM: 256
+  KLD_WEIGHT: 0.01
