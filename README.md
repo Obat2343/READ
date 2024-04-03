@@ -14,12 +14,6 @@ Install followings in the git directory.
 - RLBench (<https://github.com/Obat2343/RLBench>)
 - RotationConinuity (<https://github.com/papagina/RotationContinuity>)
 
-Next, Install requirements
-
-```sh
-pip install -r requirements.txt
-```
-
 ## Prepare Dataset
 
 To create the dataset for training and testing, please run the following command.
