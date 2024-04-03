@@ -84,7 +84,7 @@ else:
 
 if not args.debug:
     wandb.login()
-    run = wandb.init(project='Continuous_Diffusion', entity='tendon', group=cfg.DATASET.RLBENCH.TASK_NAME,
+    run = wandb.init(project='Continuous_Diffusion',  group=cfg.DATASET.RLBENCH.TASK_NAME,
                     config=obj, save_code=True, name=dir_name, dir=save_dir)
 
 model_save_dir = os.path.join(save_path, "model")

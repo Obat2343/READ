@@ -11,7 +11,7 @@ import numpy as np
 
 sys.path.append("../")
 
-from pycode.DF.vae import VAE_Loss, Single_Class_TransformerVAE, Multi_Latent_TransformerVAE
+from pycode.READ.vae import VAE_Loss, Single_Class_TransformerVAE, Multi_Latent_TransformerVAE
 from pycode.misc import str2bool, save_checkpoint, Time_memo, save_args, get_pos, visualize_multi_query_pos
 from pycode.dataset import RLBench_DMOEBM
 from pycode.config import _C as cfg
@@ -76,7 +76,7 @@ else:
 
 if not args.debug:
     wandb.login()
-    run = wandb.init(project='ACTOR', entity='tendon',
+    run = wandb.init(project='ACTOR', 
                     config=obj, save_code=True, group=cfg.DATASET.RLBENCH.TASK_NAME, name=dir_name, dir=save_dir)
 
 model_save_dir = os.path.join(save_path, "model")
@@ -104,8 +104,8 @@ val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=100, shuffl
     
 # set model
 input_size = 10 * (args.frame + 1)
-# model = Single_Class_TransformerVAE(input_keys, input_dims, args.frame + 1, latent_dim=cfg.VAE.LATENT_DIM, intrinsic=train_dataset.info_dict["data_list"][0]["camera_intrinsic"]).to(device)
-model = Multi_Latent_TransformerVAE(input_keys, input_dims, args.frame + 1, latent_dim=cfg.VAE.LATENT_DIM, intrinsic=train_dataset.info_dict["data_list"][0]["camera_intrinsic"]).to(device)
+model = Single_Class_TransformerVAE(input_keys, input_dims, args.frame + 1, latent_dim=cfg.VAE.LATENT_DIM, intrinsic=train_dataset.info_dict["data_list"][0]["camera_intrinsic"]).to(device)
+# model = Multi_Latent_TransformerVAE(input_keys, input_dims, args.frame + 1, latent_dim=cfg.VAE.LATENT_DIM, intrinsic=train_dataset.info_dict["data_list"][0]["camera_intrinsic"]).to(device)
 
 temp_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1000, num_workers=2, shuffle=False)
 vae_loss = VAE_Loss(rot_mode=rot_mode, kld_weight=cfg.VAE.KLD_WEIGHT)

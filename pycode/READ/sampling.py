@@ -26,7 +26,7 @@ import abc
 from scipy import integrate
 
 from . import utils
-from ..DF import sde_lib
+from ..READ import sde_lib
 
 _CORRECTORS = {}
 _PREDICTORS = {}
@@ -76,7 +76,7 @@ def get_predictor(name):
 def get_corrector(name):
     return _CORRECTORS[name]
 
-def get_sampling_fn(cfg, sde, shape, inverse_scaler, eps, device="cuda", energy=False, noise_sampler=None, guidance=False):
+def get_sampling_fn(cfg, sde, shape, inverse_scaler, eps, device="cuda", noise_sampler=None, guidance=False):
     """Create a sampling function.
 
     Args:
@@ -97,7 +97,6 @@ def get_sampling_fn(cfg, sde, shape, inverse_scaler, eps, device="cuda", energy=
                                     shape_dict=shape,
                                     inverse_scaler=inverse_scaler,
                                     denoise=cfg.SDE.SAMPLING.NOISE_REMOVAL,
-                                    energy=energy,
                                     eps=eps,
                                     device=device)
     # Predictor-Corrector sampling. Predictor-only and Corrector-only samplers are special cases.
@@ -114,7 +113,6 @@ def get_sampling_fn(cfg, sde, shape, inverse_scaler, eps, device="cuda", energy=
                                     n_steps=cfg.SDE.SAMPLING.N_STEPS_EACH,
                                     probability_flow=cfg.SDE.SAMPLING.PROBABILITY_FLOW,
                                     continuous=cfg.SDE.TRAINING.CONTINUOUS,
-                                    energy=energy,
                                     model_inout_mode=cfg.MODEL.INOUT,
                                     denoise=cfg.SDE.SAMPLING.NOISE_REMOVAL,
                                     guidance=guidance,
@@ -457,18 +455,18 @@ class NoneCorrector(Corrector):
     def update_fn(self, x, t, condition=None):
         return x, x
 
-def shared_predictor_update_fn(x, t, dt, sde, model, predictor, probability_flow, continuous, energy, condition=None, retrieved=None, noise_sampler=None, mode="m", guidance=False):
+def shared_predictor_update_fn(x, t, dt, sde, model, predictor, probability_flow, continuous, condition=None, retrieved=None, noise_sampler=None, mode="m", guidance=False):
     """A wrapper that configures and returns the update function of predictors."""
     if type(condition) == type(None):
         if guidance:
             score_fn = utils.get_score_fn_CG(sde, model, train=False, continuous=continuous, fixed_condition=False)
         else:
-            score_fn = utils.get_score_fn(sde, model, energy, train=False, continuous=continuous)
+            score_fn = utils.get_score_fn(sde, model, train=False, continuous=continuous)
     else:
         if guidance:
             score_fn = utils.get_score_fn_CG(sde, model, train=False, continuous=continuous, fixed_condition=True)
         else:
-            score_fn = utils.get_score_fn(sde, model, energy, train=False, continuous=continuous, fixed_condition=True)
+            score_fn = utils.get_score_fn(sde, model, train=False, continuous=continuous, fixed_condition=True)
 
     if predictor is None:
         # Corrector-only sampler
@@ -483,12 +481,12 @@ def shared_predictor_update_fn(x, t, dt, sde, model, predictor, probability_flow
     return predictor_obj.update_fn(x, t, dt, condition, retrieved)
 
 
-def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, energy, snr, n_steps, condition=None, guidance=False):
+def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_steps, condition=None, guidance=False):
     """A wrapper tha configures and returns the update function of correctors."""
     if type(condition) == type(None):
-        score_fn = utils.get_score_fn(sde, model, energy, train=False, continuous=continuous)
+        score_fn = utils.get_score_fn(sde, model, train=False, continuous=continuous)
     else:
-        score_fn = utils.get_score_fn(sde, model, energy, train=False, continuous=continuous, fixed_condition=True)
+        score_fn = utils.get_score_fn(sde, model, train=False, continuous=continuous, fixed_condition=True)
 
     if corrector is None:
         # Predictor-only sampler
@@ -498,7 +496,7 @@ def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, energy, 
     return corrector_obj.update_fn(x, t, condition)
 
 def get_pc_sampler(sde, shape_dict, predictor, corrector, inverse_scaler, snr, noise_sampler=None,
-                    n_steps=1, probability_flow=False, continuous=False, energy=False, model_inout_mode="l-m",
+                    n_steps=1, probability_flow=False, continuous=False, model_inout_mode="l-m",
                     denoise=True, eps=1e-3, device='cuda', guidance=False):
     """Create a Predictor-Corrector (PC) sampler.
 
@@ -525,7 +523,6 @@ def get_pc_sampler(sde, shape_dict, predictor, corrector, inverse_scaler, snr, n
                                             predictor=predictor,
                                             probability_flow=probability_flow,
                                             continuous=continuous,
-                                            energy=energy,
                                             noise_sampler=noise_sampler,
                                             mode=model_inout_mode,
                                             guidance=guidance)
@@ -533,7 +530,6 @@ def get_pc_sampler(sde, shape_dict, predictor, corrector, inverse_scaler, snr, n
                                             sde=sde,
                                             corrector=corrector,
                                             continuous=continuous,
-                                            energy=energy,
                                             snr=snr,
                                             n_steps=n_steps)
 
@@ -699,7 +695,7 @@ def get_pc_sampler(sde, shape_dict, predictor, corrector, inverse_scaler, snr, n
     return pc_sampler
 
 def get_ode_sampler(sde, shape_dict, inverse_scaler,
-                    denoise=False, energy=False, rtol=1e-5, atol=1e-5,
+                    denoise=False, rtol=1e-5, atol=1e-5,
                     method='RK45', eps=1e-3, device='cuda'):
     """Probability flow ODE sampler with the black-box ODE solver.
 
@@ -724,12 +720,12 @@ def get_ode_sampler(sde, shape_dict, inverse_scaler,
             if CG:
                 score_fn = utils.get_score_fn_CG(sde, model, train=False, continuous=True)
             else:
-                score_fn = utils.get_score_fn(sde, model, energy, train=False, continuous=True)
+                score_fn = utils.get_score_fn(sde, model, train=False, continuous=True)
         else:
             if CG:
                 score_fn = utils.get_score_fn_CG(sde, model, train=False, continuous=True, fixed_condition=True)
             else:
-                score_fn = utils.get_score_fn(sde, model, energy, train=False, continuous=True, fixed_condition=True)
+                score_fn = utils.get_score_fn(sde, model, train=False, continuous=True, fixed_condition=True)
         # Reverse diffusion predictor for denoising
         predictor_obj = ReverseDiffusionPredictor(sde, score_fn, probability_flow=False)
         for key in x.keys():
@@ -746,7 +742,7 @@ def get_ode_sampler(sde, shape_dict, inverse_scaler,
         if CG:
             score_fn = utils.get_score_fn_CG(sde, model, train=False, continuous=True, fixed_condition=fixed_condition)
         else:
-            score_fn = utils.get_score_fn(sde, model, energy, train=False, continuous=True, fixed_condition=fixed_condition)
+            score_fn = utils.get_score_fn(sde, model, train=False, continuous=True, fixed_condition=fixed_condition)
         rsde = sde.reverse(score_fn, probability_flow=True)
         return rsde.sde(x, t, condition, retrieved)[0]
 

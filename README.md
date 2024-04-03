@@ -34,14 +34,14 @@ Please train a VAE first.
 
 ```sh
 cd main
-python DF/Train_ACTOR.py --config_path ../config/Train_ACTOR.yaml
+python READ/Train_ACTOR.py --config_path ../config/Train_ACTOR.yaml
 ```
 
 ### Train
 
 ```sh
 cd main
-python DF/Train_Retrieval_IRSDE.py
+python READ/Train_Retrieval_IRSDE.py
 ```
 
 ### Test

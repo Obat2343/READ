@@ -19,7 +19,7 @@
 
 import torch
 import warnings
-from ..DF import sde_lib
+from ..READ import sde_lib
 
 def get_model_fn(model, train=False):
     """Create a function to give the output of the score-based model.
@@ -62,7 +62,7 @@ def get_model_fn(model, train=False):
 
     return model_fn
 
-def get_score_fn(sde, model, energy, train=False, continuous=False, fixed_condition=False):
+def get_score_fn(sde, model, train=False, continuous=False, fixed_condition=False):
     """Wraps `score_fn` so that the model output corresponds to a real time-dependent score function.
 
     Args:
@@ -76,7 +76,7 @@ def get_score_fn(sde, model, energy, train=False, continuous=False, fixed_condit
     """
     model_fn = get_model_fn(model, train=train)
 
-    if (isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE)) and not energy:
+    if (isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE)):
         def score_fn(x, t, condition=None, retrieved=None):
             # Scale neural network output by standard deviation and flip sign
             if continuous or isinstance(sde, sde_lib.subVPSDE):
@@ -101,48 +101,8 @@ def get_score_fn(sde, model, energy, train=False, continuous=False, fixed_condit
                 elif score[key].dim() == 3:
                     score[key] = -score[key] / std[:, None, None]
             return score
-
-    elif (isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE)) and energy:
-        def score_fn(x, t, condition=None, retrieved=None):
-            # Scale neural network output by standard deviation and flip sign
-            with torch.enable_grad():
-                for key in x.keys():
-                    x[key] = x[key].detach()
-                    x[key].requires_grad_(True)
-                
-                if continuous or isinstance(sde, sde_lib.subVPSDE):
-                    # For VP-trained models, t=0 corresponds to the lowest noise level
-                    # The maximum value of time embedding is assumed to 999 for
-                    # continuously-trained models.
-                    raise NotImplementedError("TODO")
-                    labels = t * 999
-                    energy = model_fn(x, labels, condition, fixed_condition)
-                    zero_x = {}
-                    for key in x.keys():
-                        zero_x[key] = torch.zeros_like(x[key])
-                    std = sde.marginal_prob(zero_x, t)[1]
-                else:
-                    # For VP-trained models, t=0 corresponds to the lowest noise level
-                    labels = t * (sde.N - 1)
-                    energy = model_fn(x, labels, condition, fixed_condition)
-                    std = sde.sqrt_1m_alphas_cumprod.to(labels.device)[labels.long()]
-                
-                # get score via differentiation of energy with respect to perturbed_data
-                sum_energy = energy.sum()
-                sum_energy.backward(create_graph=True)
-            
-            score = {}
-            for key in x.keys():
-                score[key] = x[key].grad.detach()
-
-            for key in score.keys():
-                if score[key].dim() == 2:
-                    score[key] = -score[key] / std[:, None]
-                elif score[key].dim() == 3:
-                    score[key] = -score[key] / std[:, None, None]
-            return score
     
-    elif isinstance(sde, sde_lib.VESDE) and not energy:
+    elif isinstance(sde, sde_lib.VESDE):
         def score_fn(x, t, condition=None, retrieved=None):
             if continuous:
                 zero_x = {}
@@ -156,36 +116,6 @@ def get_score_fn(sde, model, energy, train=False, continuous=False, fixed_condit
                 labels = torch.round(labels).long()
 
             score = model_fn(x, labels, condition, fixed_condition)
-            return score
-
-    elif isinstance(sde, sde_lib.VESDE) and energy:
-        def score_fn(x, t, condition=None, retrieved=None):
-            with torch.enable_grad():
-                for key in x.keys():
-                    x[key] = x[key].detach()
-                    x[key].requires_grad_(True)
-
-                if continuous:
-                    zero_x = {}
-                    for key in x.keys():
-                        zero_x[key] = torch.zeros_like(x[key])
-                    labels = sde.marginal_prob(zero_x, t)[1]
-                else:
-                    # For VE-trained models, t=0 corresponds to the highest noise level
-                    labels = sde.T - t
-                    labels *= sde.N - 1
-                    labels = torch.round(labels).long()
-
-                energy = model_fn(x, labels, condition, fixed_condition)
-
-                # get score via differentiation of energy with respect to perturbed_data
-                sum_energy = energy.sum()
-                sum_energy.backward(create_graph=True)
-            
-            score = {}
-            for key in x.keys():
-                score[key] = x[key].grad.detach()
-
             return score
 
     elif isinstance(sde, sde_lib.IRSDE):

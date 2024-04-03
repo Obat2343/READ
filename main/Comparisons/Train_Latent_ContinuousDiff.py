@@ -12,9 +12,9 @@ sys.path.append("../")
 from pycode.config import _C as cfg
 from pycode.dataset import RLBench_DMOEBM
 from pycode.misc import str2bool, save_checkpoint, save_args, load_checkpoint
-from pycode.DF.model import SPE_Continuous_Latent_Diffusion, AvgPool_Continuous_Latent_Diffusion, ConvPool_Continuous_Latent_Diffusion, Timm_Continuous_Latent_Diffusion
-from pycode.DF.vae import Single_Class_TransformerVAE
-from pycode.DF import losses, sde_lib, noise_sampler
+from pycode.READ.model import SPE_Continuous_Latent_Diffusion, AvgPool_Continuous_Latent_Diffusion, ConvPool_Continuous_Latent_Diffusion, Timm_Continuous_Latent_Diffusion
+from pycode.READ.vae import Single_Class_TransformerVAE
+from pycode.READ import losses, sde_lib, noise_sampler
 
 ##### parser #####
 parser = argparse.ArgumentParser(description='parser for image generator')
@@ -84,7 +84,7 @@ else:
 
 if not args.debug:
     wandb.login()
-    run = wandb.init(project='Latent_Diffusion', entity='tendon', group=cfg.DATASET.RLBENCH.TASK_NAME,
+    run = wandb.init(project='Latent_Diffusion',  group=cfg.DATASET.RLBENCH.TASK_NAME,
                     config=obj, save_code=True, name=dir_name, dir=save_dir)
 
 model_save_dir = os.path.join(save_path, "model")

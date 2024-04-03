@@ -22,10 +22,10 @@ import torch
 import torch.optim as optim
 import numpy as np
 from einops import rearrange
-from ..DF import utils
-from ..DF.sde_lib import VESDE, VPSDE, IRSDE
+from ..READ import utils
+from ..READ.sde_lib import VESDE, VPSDE, IRSDE
 
-def get_loss_fn(sde, target="auto", train=True, noise_sampler=None, energy=False, reduce_mean=False, continuous=True, likelihood_weighting=False, model_type="m"):
+def get_loss_fn(sde, target="auto", train=True, noise_sampler=None, reduce_mean=False, continuous=True, likelihood_weighting=False, model_type="m"):
     """Create a one-step training/evaluation function.
 
     Args:
@@ -33,7 +33,6 @@ def get_loss_fn(sde, target="auto", train=True, noise_sampler=None, energy=False
         tareget: String. If "auto", target is automatically select among ["noise", "gt_motion"].
         train: Bool.
         noise_sampler: A function to sample noise
-        energy: please ignore this. If True, the diffusion model output the scaler instead vector. Then, vector is obtained by computing the gradient of scaler value respect to motion.
         reduce_mean: If `True`, average the loss across data dimensions. Otherwise sum the loss across data dimensions.
         continuous: `True` indicates that the model is defined to take continuous time steps.
         likelihood_weighting: If `True`, weight the mixture of score matching losses according to https://arxiv.org/abs/2101.09258; otherwise use the weighting recommended by our paper.
@@ -50,8 +49,6 @@ def get_loss_fn(sde, target="auto", train=True, noise_sampler=None, energy=False
             target = "gt_motion"
 
     if continuous:
-        assert not energy, "not implemented (TODO)"
-
         if model_type == "m":
             if noise_sampler != None:
                 raise NotImplementedError()
@@ -90,13 +87,9 @@ def get_loss_fn(sde, target="auto", train=True, noise_sampler=None, energy=False
             
     else:
         assert not likelihood_weighting, "Likelihood weighting is not supported for original SMLD/DDPM training."
-        if isinstance(sde, VESDE) and energy:
-            raise NotImplementedError("TODO")
-        elif isinstance(sde, VESDE) and not energy:
+        if isinstance(sde, VESDE):
             loss_fn = get_smld_loss_fn(sde, train, reduce_mean=reduce_mean)
-        elif isinstance(sde, VPSDE) and energy:
-            loss_fn = get_energy_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
-        elif isinstance(sde, VPSDE) and not energy:
+        elif isinstance(sde, VPSDE):
             loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
         else:
             raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
@@ -111,7 +104,6 @@ def get_loss_fn_CG(sde, target="auto", train=True, noise_sampler=None, reduce_me
         tareget: String. If "auto", target is automatically select among ["noise", "gt_motion"].
         train: Bool.
         noise_sampler: A function to sample noise
-        energy: please ignore this. If True, the diffusion model output the scaler instead vector. Then, vector is obtained by computing the gradient of scaler value respect to motion.
         reduce_mean: If `True`, average the loss across data dimensions. Otherwise sum the loss across data dimensions.
         continuous: `True` indicates that the model is defined to take continuous time steps.
         likelihood_weighting: If `True`, weight the mixture of score matching losses according to https://arxiv.org/abs/2101.09258; otherwise use the weighting recommended by our paper.
@@ -248,13 +240,9 @@ def get_loss_fn_CG(sde, target="auto", train=True, noise_sampler=None, reduce_me
             #     loss_fn = get_latent_motion_loss_fn_for_lm(sde, train, noise_sampler, reduce_mean=reduce_mean)      
     else:
         assert not likelihood_weighting, "Likelihood weighting is not supported for original SMLD/DDPM training."
-        if isinstance(sde, VESDE) and energy:
-            raise NotImplementedError("TODO")
-        elif isinstance(sde, VESDE) and not energy:
+        if isinstance(sde, VESDE):
             loss_fn = get_smld_loss_fn(sde, train, reduce_mean=reduce_mean)
-        elif isinstance(sde, VPSDE) and energy:
-            loss_fn = get_energy_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
-        elif isinstance(sde, VPSDE) and not energy:
+        elif isinstance(sde, VPSDE):
             loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
         else:
             raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
@@ -748,60 +736,6 @@ def get_triplet_loss_fn(train, margin1=0.5, margin2=2.0):
 ##################################################################################################################################################
 
 # miscellaneous
-
-def get_energy_ddpm_loss_fn(vpsde, train, reduce_mean=True):
-    """Legacy code to reproduce previous results on DDPM. Not recommended for new work."""
-    assert isinstance(vpsde, VPSDE), "DDPM training only works for VPSDEs."
-
-    reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
-
-    def loss_fn(model, batch, condition=None):
-        key_list = list(batch.keys())
-        B = batch[key_list[0]].shape[0]
-        device = batch[key_list[0]].device
-
-        model_fn = utils.get_model_fn(model, train=train)
-        labels = torch.randint(0, vpsde.N, (B,), device=device)
-        sqrt_alphas_cumprod = vpsde.sqrt_alphas_cumprod.to(device)
-        sqrt_1m_alphas_cumprod = vpsde.sqrt_1m_alphas_cumprod.to(device)
-
-        perturbed_data = {}
-        noise = {}
-        for key in batch.keys():
-            noise[key] = torch.randn_like(batch[key])
-            if batch[key].dim() == 2:
-                perturbed_data[key] = sqrt_alphas_cumprod[labels, None] * batch[key] + \
-                            sqrt_1m_alphas_cumprod[labels, None] * noise[key]
-                perturbed_data[key] = perturbed_data[key].detach()
-                perturbed_data[key].requires_grad_(True)
-            elif batch[key].dim() == 3:
-                perturbed_data[key] = sqrt_alphas_cumprod[labels, None, None] * batch[key] + \
-                            sqrt_1m_alphas_cumprod[labels, None, None] * noise[key]
-                perturbed_data[key] = perturbed_data[key].detach()
-                perturbed_data[key].requires_grad_(True)
-
-        # pred energy 
-        energy = model_fn(perturbed_data, labels, condition=condition)
-
-        # get score via differentiation of energy with respect to perturbed_data
-        sum_energy = energy.sum()
-        grad_x = torch.autograd.grad(sum_energy, [perturbed_data[key] for key in perturbed_data.keys()], create_graph=True)
-        # sum_energy.backward(create_graph=True)
-        
-        total_loss = 0
-        loss_dict = {}
-        for key, grad in zip(perturbed_data.keys(), grad_x):
-            losses = torch.square(grad - noise[key])
-            losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
-            loss = torch.mean(losses)
-
-            total_loss += loss
-            loss_dict[f"{'train' if train else 'val'}/{key}"] = loss.item()
-        
-        loss_dict[f"{'train' if train else 'val'}/loss"] = total_loss.item()
-        return total_loss, loss_dict
-
-    return loss_fn
 
 def get_latent_motion_sde_loss_fn(sde, train, reduce_mean=True, pred_type="m0", eps=1e-5):
     """Create a loss function for training with arbirary SDEs.

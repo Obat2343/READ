@@ -13,9 +13,9 @@ sys.path.append("../")
 from pycode.config import _C as cfg
 from pycode.dataset import RLBench_Retrieval
 from pycode.misc import str2bool, save_checkpoint, save_args, load_checkpoint
-from pycode.DF.model import SPE_Continuous_Latent_Diffusion, Timm_Continuous_Latent_Diffusion, AvgPool_Continuous_Latent_Diffusion, ConvPool_Continuous_Latent_Diffusion
-from pycode.DF.vae import Single_Class_TransformerVAE
-from pycode.DF import losses, sde_lib, noise_sampler
+from pycode.READ.model import SPE_Continuous_Latent_Diffusion, Timm_Continuous_Latent_Diffusion, AvgPool_Continuous_Latent_Diffusion, ConvPool_Continuous_Latent_Diffusion
+from pycode.READ.vae import Single_Class_TransformerVAE
+from pycode.READ import losses, sde_lib, noise_sampler
 
 ##### parser #####
 parser = argparse.ArgumentParser(description='parser for image generator')
@@ -51,10 +51,18 @@ input_dims = [2, 1, 6, 1]
 
 if args.name == "":
     assert cfg.SDE.TRAINING.CONTINUOUS == True
+
+    if cfg.MODEL.INOUT == "l-m":
+        READ_type = ""
+    elif cfg.MODEL.INOUT == "m":
+        READ_type = "_O"
+    elif cfg.MODEL.INOUT == "l-m-l":
+        READ_type == "_L"
+
     if cfg.NOISE.NAME == "gaussian":
-        dir_name = f"Latent_ContinuousDiff_{cfg.SDE.NAME}_rank_{cfg.RETRIEVAL.RANK}_ModelIO_{cfg.MODEL.INOUT}_VAEdim_{cfg.VAE.LATENT_DIM}_frame_{args.frame}"
+        dir_name = f"READ{READ_type}_rank_{cfg.RETRIEVAL.RANK}_VAEdim_{cfg.VAE.LATENT_DIM}_frame_{args.frame}"
     else:
-        dir_name = f"Latent_ContinuousDiff_{cfg.SDE.NAME}_{cfg.NOISE.NAME}_rank_{cfg.RETRIEVAL.RANK}_ModelIO_{cfg.MODEL.INOUT}_VAEdim_{cfg.VAE.LATENT_DIM}_frame_{args.frame}"
+        dir_name = f"READ{READ_type}_{cfg.SDE.NAME}_{cfg.NOISE.NAME}_rank_{cfg.RETRIEVAL.RANK}_VAEdim_{cfg.VAE.LATENT_DIM}_frame_{args.frame}"
     
     if cfg.MODEL.NAME != "Convnext-UNet":
         dir_name = f"{dir_name}_{cfg.MODEL.NAME}"
@@ -91,7 +99,7 @@ else:
 
 if not args.debug:
     wandb.login()
-    run = wandb.init(project='Latent_Diffusion', entity='tendon', group=cfg.DATASET.RLBENCH.TASK_NAME,
+    run = wandb.init(project='Latent_Diffusion', group=cfg.DATASET.RLBENCH.TASK_NAME,
                     config=obj, save_code=True, name=dir_name, dir=save_dir)
 
 model_save_dir = os.path.join(save_path, "model")
@@ -114,7 +122,7 @@ train_dataset  = RLBench_Retrieval("train", cfg, save_dataset=args.reset_dataset
 train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
 
 val_dataset = RLBench_Retrieval("val", cfg, save_dataset=args.reset_dataset, num_frame=args.frame, rot_mode=rot_mode, keys=input_keys, rank=cfg.RETRIEVAL.RANK)
-val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=100, shuffle=False, num_workers=8)
+val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, num_workers=8)
 
 # set vae
 if args.vae_path == "":
@@ -171,19 +179,15 @@ sde = sde_lib.IRSDE(keys=input_keys, lamda=cfg.SDE.IRSDES.LAMDA, theta_1=cfg.SDE
 noise_name = cfg.NOISE.NAME
 if noise_name == "gaussian":
     noise_sample_func = noise_sampler.Normal_Noise()
-elif noise_name == "knn":
-    noise_sample_func = noise_sampler.Latent_Noise_from_kNN(train_dataset, vae, cfg.NOISE.KNN.RANK)
-elif noise_name == "all_knn":
-    noise_sample_func = noise_sampler.Latent_Noise_from_All_kNN(train_dataset, vae, cfg.NOISE.KNN.RANK)
 else:
     raise NotImplementedError(f"{noise_name} is unknown")
 
 # set optimizer and loss
 optimizer = torch.optim.Adam(model.parameters(), lr=cfg.OPTIM.LR)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=cfg.OPTIM.SCHEDULER.STEP, gamma=cfg.OPTIM.SCHEDULER.GAMMA)
-Train_loss = losses.get_loss_fn(sde, target=cfg.MODEL.TARGET, noise_sampler=noise_sample_func, energy=False, train=True, reduce_mean=True, continuous=cfg.SDE.TRAINING.CONTINUOUS,
+Train_loss = losses.get_loss_fn(sde, target=cfg.MODEL.TARGET, noise_sampler=noise_sample_func, train=True, reduce_mean=True, continuous=cfg.SDE.TRAINING.CONTINUOUS,
                                     likelihood_weighting=False, model_type=cfg.MODEL.INOUT)
-Val_loss = losses.get_loss_fn(sde, target=cfg.MODEL.TARGET, noise_sampler=noise_sample_func,energy=False, train=False, reduce_mean=True, continuous=cfg.SDE.TRAINING.CONTINUOUS,
+Val_loss = losses.get_loss_fn(sde, target=cfg.MODEL.TARGET, noise_sampler=noise_sample_func, train=False, reduce_mean=True, continuous=cfg.SDE.TRAINING.CONTINUOUS,
                                     likelihood_weighting=False, model_type=cfg.MODEL.INOUT)
 
 ##### start training #####

@@ -12,16 +12,16 @@ import numpy as np
 import cv2
 import torch
 import torchvision
-import pytorch3d
-import pytorch3d.transforms
 import torch.nn as nn
+import torch.nn.functional as F
 
 from typing import Dict, Callable, List
+from collections import OrderedDict
+
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import RotationSpline
 from scipy import interpolate
 from tqdm import tqdm
-from collections import OrderedDict
 from PIL import Image, ImageDraw, ImageFont
 from einops import rearrange, reduce, repeat
 from torchvision import models
@@ -135,20 +135,8 @@ def visualize(x, debug_info, gt, save_dir, iteration):
     visualize_dict = {}
     os.makedirs(save_dir, exist_ok=True)
     for key in debug_info.keys():
-        if "heatmap" in key:
-            visualize_dict[key] = visualize_heatmap(x, gt, debug_info[key], debug_info["pose"])
-        elif key == "uv":
+        if key == "uv":
             visualize_dict[key] = visualize_points(x, gt, debug_info[key], debug_info["pose"])
-        elif "atten_points" in key:
-            visualize_dict[key] = visualize_points(x, gt, debug_info[key], debug_info["pose"])
-        elif "atten_mask" in key:
-            visualize_dict[key] = visualize_heatmap(x, gt, debug_info[key], debug_info["pose"])
-        elif "energy_map" in key:
-            visualize_dict[key] = visualize_valuemap(x, key, debug_info, save_dir, iteration)
-        elif "pred_coef" == key:
-            visualize_dict[key] = visualize_points(x, gt, debug_info["pred_uv"], coef = debug_info[key])
-        elif key[:3] == "sep":
-            visualize_dict[key] = visualize_valuemap(x, key, debug_info, save_dir, iteration)
         elif "pose" in key:
             continue
         else:
@@ -407,7 +395,7 @@ def visualize_query(image, query, camera_intrinsic, rot_mode="quat", img_size=(1
     rot = query["rotation"]
     
     if (rot_mode == "6d") and (rot.dim() == 2):
-        rot = pytorch3d.transforms.rotation_6d_to_matrix(rot)
+        rot = rotation_6d_to_matrix(rot)
 
     pos_np = pos.numpy()
     rot_np = rot.numpy()
@@ -695,6 +683,50 @@ def visualize_inf_query(top_n, batch_size, inf_sample, gt_query, image, intrinsi
     return visualize_multi_query_pos(image, query_list, intrinsic, rot_mode=rot_mode, score_list=score_list)
 
 ##### else #####
+
+def rotation_6d_to_matrix(d6: torch.Tensor) -> torch.Tensor:
+    """
+    This code is copied from https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/transforms/rotation_conversions.html#matrix_to_rotation_6d
+    Converts 6D rotation representation by Zhou et al. [1] to rotation matrix
+    using Gram--Schmidt orthogonalization per Section B of [1].
+    Args:
+        d6: 6D rotation representation, of size (*, 6)
+
+    Returns:
+        batch of rotation matrices of size (*, 3, 3)
+
+    [1] Zhou, Y., Barnes, C., Lu, J., Yang, J., & Li, H.
+    On the Continuity of Rotation Representations in Neural Networks.
+    IEEE Conference on Computer Vision and Pattern Recognition, 2019.
+    Retrieved from http://arxiv.org/abs/1812.07035
+    """
+
+    a1, a2 = d6[..., :3], d6[..., 3:]
+    b1 = F.normalize(a1, dim=-1)
+    b2 = a2 - (b1 * a2).sum(-1, keepdim=True) * b1
+    b2 = F.normalize(b2, dim=-1)
+    b3 = torch.cross(b1, b2, dim=-1)
+    return torch.stack((b1, b2, b3), dim=-2)
+
+def matrix_to_rotation_6d(matrix: torch.Tensor) -> torch.Tensor:
+    """
+    This code is copied from https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/transforms/rotation_conversions.html#matrix_to_rotation_6d
+    Converts rotation matrices to 6D rotation representation by Zhou et al. [1]
+    by dropping the last row. Note that 6D representation is not unique.
+    Args:
+        matrix: batch of rotation matrices of size (*, 3, 3)
+
+    Returns:
+        6D rotation representation, of size (*, 6)
+
+    [1] Zhou, Y., Barnes, C., Lu, J., Yang, J., & Li, H.
+    On the Continuity of Rotation Representations in Neural Networks.
+    IEEE Conference on Computer Vision and Pattern Recognition, 2019.
+    Retrieved from http://arxiv.org/abs/1812.07035
+    """
+    batch_dim = matrix.size()[:-2]
+    return matrix[..., :2, :].clone().reshape(batch_dim + (6,))
+
 def cat_pos_and_neg(positive_query, negative_query, device='cuda'):
     cat_query = {}
     for key in positive_query.keys():
@@ -746,14 +778,14 @@ def gaussian_noise(query,pos_std,rot_std,grasp_prob,intrinsic,rot_mode="quat",im
         noise_rot = noise_rot_r.as_matrix()
         noise_rot = torch.tensor(noise_rot, dtype=torch.float)
     elif rot_mode == "6d":
-        rot = pytorch3d.transforms.rotation_6d_to_matrix(rot)
+        rot = rotation_6d_to_matrix(rot)
         rot_r = R.from_matrix(rot.numpy())
         rot_euler = rot_r.as_euler('zxy', degrees=True)
         noise_rot_euler = rot_euler + rot_noise.numpy()
         noise_rot_r = R.from_euler('zxy', noise_rot_euler, degrees=True)
         noise_rot = noise_rot_r.as_matrix()
         noise_rot = torch.tensor(noise_rot, dtype=torch.float)
-        noise_rot = pytorch3d.transforms.matrix_to_rotation_6d(noise_rot)
+        noise_rot = matrix_to_rotation_6d(noise_rot)
     
     if dim == 3:
         noise_rot = rearrange(noise_rot, "(B N) ... -> B N ...", B=B)
@@ -833,7 +865,7 @@ def interpolate_batch(query, output_time, rot_mode="quat"):
             interpolated_rot_ins = rot_curve(output_time).as_matrix()
         elif rot_mode == "6d":
             query_rot = rotation_batch[i]
-            query_rot = pytorch3d.transforms.rotation_6d_to_matrix(query_rot)
+            query_rot = rotation_6d_to_matrix(query_rot)
             query_rot = R.from_matrix(query_rot.cpu().numpy())
             rot_curve = RotationSpline(time_batch, query_rot)
             interpolated_rot_ins = rot_curve(output_time).as_matrix()
@@ -864,7 +896,7 @@ def interpolate_batch(query, output_time, rot_mode="quat"):
     
     interpolated_rot = torch.tensor(np.array(interpolated_rot), dtype=torch.float)
     if rot_mode == "6d":
-        interpolated_rot = pytorch3d.transforms.matrix_to_rotation_6d(interpolated_rot)
+        interpolated_rot = matrix_to_rotation_6d(interpolated_rot)
     interpolated_query["rotation"] = interpolated_rot
     return interpolated_query
 
@@ -908,7 +940,7 @@ def get_pos(query, intrinsic, image_size=(256,256)):
 
 def convert_rotation_6d_to_matrix(query_list):
     for i, query in enumerate(query_list):
-        query_list[i]["rotation"] = pytorch3d.transforms.rotation_6d_to_matrix(query["rotation"])
+        query_list[i]["rotation"] = rotation_6d_to_matrix(query["rotation"])
     return query_list
 
 def str2bool(s):

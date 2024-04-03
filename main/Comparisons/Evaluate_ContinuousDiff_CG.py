@@ -77,9 +77,9 @@ from pycode.config import _C as cfg
 from pycode.misc import load_checkpoint, convert_rotation_6d_to_matrix, visualize_inf_query, get_pos, visualize_multi_query_pos
 from pycode.misc import calculate_euclid_pos, calculate_euclid_angle, calculate_euclid_grasp, output2action, check_img, get_gt_pose, make_video, get_concat_h
 from pycode.retrieval import Direct_Retrieval, Image_Based_Retrieval_SPE, BYOL_Retrieval, CLIP_Retrieval, MSE_Based_Retrieval
-from pycode.DF.model import SPE_Continuous_Diffusion_CG
-from pycode.DF import sampling
-from pycode.DF import sde_lib
+from pycode.READ.model import SPE_Continuous_Diffusion_CG
+from pycode.READ import sampling
+from pycode.READ import sde_lib
 
 ### SET CONFIG ###
 dataset_name = "RLBench-test"

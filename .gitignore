@@ -5,7 +5,6 @@ __pycache__
 /git
 /jupyter
 /result
-/hoge
 /global_result
 /weights
 /prepare_dataset

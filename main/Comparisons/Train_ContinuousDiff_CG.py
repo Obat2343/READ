@@ -15,9 +15,9 @@ sys.path.append("../")
 from pycode.config import _C as cfg
 from pycode.dataset import RLBench_Retrieval
 from pycode.misc import str2bool, save_checkpoint, save_args
-from pycode.DF.model import SPE_Continuous_Diffusion_CG
-from pycode.DF import losses
-from pycode.DF import sde_lib
+from pycode.READ.model import SPE_Continuous_Diffusion_CG
+from pycode.READ import losses
+from pycode.READ import sde_lib
 
 ##### parser #####
 parser = argparse.ArgumentParser(description='parser for image generator')
@@ -89,7 +89,7 @@ else:
 
 if not args.debug:
     wandb.login()
-    run = wandb.init(project='Continuous_Diffusion', entity='tendon', group=cfg.DATASET.RLBENCH.TASK_NAME,
+    run = wandb.init(project='Continuous_Diffusion',  group=cfg.DATASET.RLBENCH.TASK_NAME,
                     config=obj, save_code=True, name=dir_name, dir=save_dir)
 
 model_save_dir = os.path.join(save_path, "model")

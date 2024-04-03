@@ -76,7 +76,7 @@ else:
 
 if not args.debug:
     wandb.login()
-    run = wandb.init(project='ACTOR', entity='tendon',
+    run = wandb.init(project='ACTOR', 
                     config=obj, save_code=True, group=cfg.DATASET.RLBENCH.TASK_NAME, name=dir_name, dir=save_dir)
 
 model_save_dir = os.path.join(save_path, "model")

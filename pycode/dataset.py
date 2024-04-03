@@ -7,8 +7,6 @@ import math
 
 import torch
 import torchvision
-import pytorch3d
-import pytorch3d.transforms
 
 import numpy as np
 import imgaug.augmenters as iaa
@@ -21,202 +19,24 @@ from scipy import interpolate
 
 from .misc import get_pos
 
-class Circles_Dataset(torch.utils.data.Dataset):
-    
-    def __init__(self, max_len=1.0, centers=[[0.0,2.0], [2.0,-2.0], [-2.0,-2.0]], keys="none"):
-        self.max_len = max_len
-        self.centers = centers
-        if keys == "none":
-            self.key_list = ["coordinate", "angle", "length", "center"]
-        else:
-            self.key_list = keys
+def matrix_to_rotation_6d(matrix: torch.Tensor) -> torch.Tensor:
+    """
+    This code is copied from https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/transforms/rotation_conversions.html#matrix_to_rotation_6d
+    Converts rotation matrices to 6D rotation representation by Zhou et al. [1]
+    by dropping the last row. Note that 6D representation is not unique.
+    Args:
+        matrix: batch of rotation matrices of size (*, 3, 3)
 
-    def __len__(self):
-        return 10000
-        
-    def __getitem__(self, data_index):
-        data = {}
+    Returns:
+        6D rotation representation, of size (*, 6)
 
-        length = self.max_len * torch.rand(1)
-        angle = (torch.rand(1) * 2 - 1) * torch.tensor(math.pi)
-        
-        center = random.choice(self.centers)
-        
-        if "coordinate" in self.key_list:
-            data["coordinate"] = self.pol2cart(length, angle) + torch.tensor(center)
-        
-        if "angle" in self.key_list:
-            data["angle"] = angle
-
-        if "length" in self.key_list:
-            data["length"] = length
-
-        if "center" in self.key_list:
-            data["center"] = torch.tensor(center)
-        return data
-
-    def pol2cart(self, r, phi):
-        x = r * torch.cos(phi)
-        y = r * torch.sin(phi)
-        
-        return torch.cat([x,y])
-    
-    def keys(self):
-        # return key_list just for utility
-        return self.key_list
-
-    def gt_sdf(self, points):
-        """
-        points: torch.tensor -> (B, 2)
-        """
-        B, D = points.shape
-        
-        t_centers = torch.tensor(self.centers)
-        N, _ = t_centers.shape
-        t_centers = repeat(t_centers, "N D -> B N D", B=B)
-        
-        points = repeat(points, "B D -> B N D", N=N)
-        
-        diff = torch.nn.functional.mse_loss(points, t_centers, reduction="none")
-        diff = torch.mean(diff, dim=2)
-        
-        min_diff,_ = torch.min(diff, 1)
-        min_diff = min_diff - self.max_len
-        
-        sdf = torch.clamp(min_diff, min=0)
-        return sdf
-    
-    def gt_pdf(self, points):
-        density = 1 / ((math.pi * self.max_len * self.max_len) * len(self.centers))
-        sdf = self.gt_sdf(points)
-        densities = torch.where(sdf>0.,0.,density)
-        return densities
-
-class Line_Dataset(torch.utils.data.Dataset):
-    
-    def __init__(self, max_len=8.0, angular_velocity=2.0, keys="none"):
-        
-        self.max_len = max_len
-        self.angular_velocity = angular_velocity
-        if keys == "none":
-            self.key_list = ["coordinate", "angle", "length", "center"]
-        else:
-            self.key_list = keys
-        
-    def __len__(self):
-        return 10000
-        
-    def __getitem__(self, data_index):
-        data = {}
-        length = self.max_len * torch.rand(1)
-        angle = self.angular_velocity * length
-
-        if "length" in self.key_list:
-            data["length"] = length
-
-        if "angle" in self.key_list:
-            data["angle"] = angle
-
-        if "coordinate" in self.key_list:
-            data["coordinate"] = self.pol2cart(length, angle)
-
-        return data
-
-    def keys(self):
-        # return key_list just for utility
-        return self.key_list
-
-    def pol2cart(self, r, phi):
-        x = r * torch.cos(phi)
-        y = r * torch.sin(phi)
-        
-        return torch.cat([x,y])
-
-class Weighted_Circles_Dataset(torch.utils.data.Dataset):
-    
-    def __init__(self, max_len=1.0, centers=[[0.0,2.0], [2.0,-2.0], [-2.0,-2.0]], weights=[0.7,0.2,0.1], keys="none"):
-        self.max_len = max_len
-        self.centers = centers
-        self.weights = self.normalize_list(weights)
-        if keys == "none":
-            self.key_list = ["coordinate", "angle", "length", "center"]
-        else:
-            self.key_list = keys
-
-    def __len__(self):
-        return 10000
-        
-    def __getitem__(self, data_index):
-        data = {}
-
-        length = self.max_len * torch.rand(1)
-        angle = (torch.rand(1) * 2 - 1) * torch.tensor(math.pi)
-        
-        center = random.choices(self.centers, weights=self.weights, k=1)[0]
-        
-        if "length" in self.key_list:
-            data["length"] = length
-        
-        if "angle" in self.key_list:
-            data["angle"] = angle
-
-        if "center" in self.key_list:
-            data["center"] = torch.tensor(center)
-
-        if "coordinate" in self.key_list:
-            data["coordinate"] = self.pol2cart(length, angle) + torch.tensor(center)
-
-        return data
-
-    def keys(self):
-        # return key_list just for utility
-        return self.key_list
-
-    def pol2cart(self, r, phi):
-        x = r * torch.cos(phi)
-        y = r * torch.sin(phi)
-        
-        return torch.cat([x,y])
-    
-    def gt_sdf(self, points, with_index=False):
-        """
-        points: torch.tensor -> (B, 2)
-        """
-        B, D = points.shape
-        
-        t_centers = torch.tensor(self.centers)
-        N, _ = t_centers.shape
-        t_centers = repeat(t_centers, "N D -> B N D", B=B)
-        
-        points = repeat(points, "B D -> B N D", N=N)
-        
-        diff = torch.nn.functional.mse_loss(points, t_centers, reduction="none")
-        diff = torch.mean(diff, dim=2)
-        
-        min_diff, index = torch.min(diff, 1)
-        min_diff = min_diff - self.max_len
-        
-        sdf = torch.clamp(min_diff, min=0)
-        
-        if with_index:
-            return sdf, index
-        else:
-            return sdf
-    
-    def gt_pdf(self, points):
-        circle_area = math.pi * self.max_len * self.max_len
-        density_list = torch.tensor(self.weights) / circle_area
-        sdf, index = self.gt_sdf(points, True)
-        
-        values = density_list[index]
-        mask = torch.where(sdf>0.,0.,1)
-        return values * mask
-    
-    @staticmethod
-    def normalize_list(lst):
-        total = sum(lst)
-        normalized_lst = [x / total for x in lst]
-        return normalized_lst
+    [1] Zhou, Y., Barnes, C., Lu, J., Yang, J., & Li, H.
+    On the Continuity of Rotation Representations in Neural Networks.
+    IEEE Conference on Computer Vision and Pattern Recognition, 2019.
+    Retrieved from http://arxiv.org/abs/1812.07035
+    """
+    batch_dim = matrix.size()[:-2]
+    return matrix[..., :2, :].clone().reshape(batch_dim + (6,))
 
 class RLBench_DMOEBM(torch.utils.data.Dataset):
     """
@@ -339,7 +159,7 @@ class RLBench_DMOEBM(torch.utils.data.Dataset):
             rot = torch.tensor(rot, dtype=torch.float)
         elif self.rot_mode == "6d":
             rot = self.info_dict["rot_curve_list"][data_index](sequence_index_list).as_matrix()
-            rot = pytorch3d.transforms.matrix_to_rotation_6d(torch.tensor(rot, dtype=torch.float))
+            rot = matrix_to_rotation_6d(torch.tensor(rot, dtype=torch.float))
         else:
             raise ValueError("invalid mode for get_gripper")
         
@@ -790,7 +610,7 @@ class RLBench_Retrieval(RLBench_DMOEBM):
             rot = torch.tensor(rot, dtype=torch.float)
         elif self.rot_mode == "6d":
             rot = self.info_dict["rot_curve_list"][data_index](sequence_index_list).as_matrix()
-            rot = pytorch3d.transforms.matrix_to_rotation_6d(torch.tensor(rot, dtype=torch.float))
+            rot = matrix_to_rotation_6d(torch.tensor(rot, dtype=torch.float))
         else:
             raise ValueError("invalid mode for get_gripper")
         
