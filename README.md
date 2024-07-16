@@ -47,6 +47,7 @@ python R2Diff/Evaluate_Retrieval_IRSDE.py --config_path ../config/yamlfilename -
 
 ***
 
+```bibtex
 @inproceedings{oba2024read,
   title={READ: Retrieval-Enhanced Asymmetric Diffusion for Motion Planning},
   author={Oba, Takeru and Walter, Matthew and Ukita, Norimichi},
@@ -54,3 +55,4 @@ python R2Diff/Evaluate_Retrieval_IRSDE.py --config_path ../config/yamlfilename -
   pages={17974--17984},
   year={2024}
 }
+```
