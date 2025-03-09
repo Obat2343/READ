@@ -48,3 +48,12 @@ python R2Diff/Evaluate_READ.py --config_path ../config/yamlfilename --model_path
 
 ***
 
+```bibtex
+@inproceedings{oba2024read,
+  title={READ: Retrieval-Enhanced Asymmetric Diffusion for Motion Planning},
+  author={Oba, Takeru and Walter, Matthew and Ukita, Norimichi},
+  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+  pages={17974--17984},
+  year={2024}
+}
+```
