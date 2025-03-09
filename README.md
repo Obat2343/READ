@@ -2,7 +2,7 @@
 ## Install
 
 ```sh
-git clone Anonymous:will/be/updated
+git clone git@github.com:Obat2343/READ.git
 mkdir git
 cd git
 ```
@@ -24,25 +24,26 @@ python create_dataset.py --task_list TaskA TaskB
 
 ***
 
+### Train
+
 Please train a VAE first.
 
 ```sh
 cd main
 python READ/Train_ACTOR.py --config_path ../config/Train_ACTOR.yaml
 ```
-
-### Train
+Then, train a diffusion model.
 
 ```sh
 cd main
-python READ/Train_Retrieval_IRSDE.py
+python READ/Train_READ.py --config_path ../config/Train_READ.yaml
 ```
 
 ### Test
 
 ```sh
 cd main
-python R2Diff/Evaluate_Retrieval_IRSDE.py --config_path ../config/yamlfilename --model_path /path/to/pthfile --tasks PickUpCup --inf_method_list retrieve_from_SPE
+python R2Diff/Evaluate_READ.py --config_path ../config/yamlfilename --model_path /path/to/pthfile --tasks PickUpCup --inf_method_list retrieve_from_SPE
 ```
 
 ***
