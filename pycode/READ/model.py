@@ -231,7 +231,7 @@ class SPE_Continuous_Latent_Diffusion(Abstract_Continuous_Diffusion):
         drop_path (float): Stochastic depth rate for encoder and decoder. Default: 0.1
         """
         super().__init__()
-        self.img_size = img_size
+        self.img_size = img_size # we do not use this value. can be removed.
         if query_emb_dim == 0:
             emb_dim = dims[0] // 2
         else:

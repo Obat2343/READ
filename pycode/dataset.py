@@ -4,6 +4,7 @@ import pickle
 import copy
 import time
 import math
+import csv
 
 import torch
 import torchvision
@@ -791,3 +792,483 @@ class RLBench_BYOL_ALLImage(torch.utils.data.Dataset):
             else:
                 task_name = task_name + "_" + task
         return task_name
+
+class Baxter_Demos(torch.utils.data.Dataset):
+
+    def __init__(self, mode, cfg, save_dataset=False, debug=False, num_frame=100, image_size=1/5,
+                rot_mode="6d", img_aug=True, keys=["pos","uv","z","rotation","grasp_state","time"]):
+
+        # set dataset root
+        if cfg.DATASET.NAME == "Baxter":
+            self.data_root_dir = os.path.join(cfg.DATASET.BAXTER.PATH, mode)
+        else:
+            raise ValueError("Invalid dataset name")
+        
+        self.cfg = cfg
+        self.debug = debug
+        self.num_frame = num_frame
+        self.rot_mode = rot_mode
+        self.key_list = keys
+        self.seed = 0
+        self.cut_frames = 240
+        self.mode = mode
+        random.seed(self.seed)
+
+        self.ToTensor = torchvision.transforms.ToTensor()
+
+        self.without_img = False
+        self.aug_flag = img_aug
+        self.img_aug = iaa.OneOf([
+                        iaa.AdditiveGaussianNoise(scale=0.05*255),
+                        iaa.JpegCompression(compression=(30, 70)),
+                        iaa.WithBrightnessChannels(iaa.Add((-40, 40))),
+                        iaa.AverageBlur(k=(2, 5)),
+                        iaa.CoarseDropout(0.02, size_percent=0.5),
+                        iaa.Identity()
+                    ])
+        self.image_size = image_size
+
+        self.info_dict = {}
+        self._pickle_file_name = '{}_{}.pickle'.format(cfg.DATASET.NAME,mode)
+        self._pickle_path = os.path.join(self.data_root_dir, 'pickle', self._pickle_file_name)
+        if not os.path.exists(self._pickle_path) or save_dataset:
+            # create dataset
+            print('There is no pickle data')
+            print('create pickle data')
+            self.add_data(self.data_root_dir, cfg)
+            self.preprocess()
+            
+            # save json data
+            print('save pickle data')
+            os.makedirs(os.path.join(self.data_root_dir, 'pickle'), exist_ok=True)
+            with open(self._pickle_path, mode='wb') as f:
+                pickle.dump(self.info_dict,f)
+            print('done')
+        else:
+            # load json data
+            print('load pickle data')
+            with open(self._pickle_path, mode='rb') as f:
+                self.info_dict = pickle.load(f)
+            print('done')
+
+    def __len__(self):
+        return len(self.info_dict["data_list"])
+
+    def __getitem__(self, index):
+        """
+        Return:
+        target_image (torch.tensor: B C H W)
+        target_motion (dict): Components of this dictionary are determined by self.keys
+            key: "pos", value: torch.tensor B(batch) S(sequence length) 3(dim); position of robot hand in camera coordinate system
+            key: "uv", value: torch.tensor B(batch) S(sequence length) 2(dim); position of robot hand in image coordinate system 
+            key: "z", value: torch.tensor B S 1; depth of robot hand in camera coordinate system
+            key: "rotation", value: torch.tensor B S D(depends on representation. 6d->6)
+            key: "grasp_state", value: torch.tensor B S 1
+        positive_image (or motion); positive means this image (or motion) is similar to target image (or motion).
+        negative_image (or motion); negative means this image (or motion) is far from target image (or motion).
+        """
+        target_index = index
+        target_image = self.get_image_from_index(target_index)
+        target_motion = self.get_motion_from_index(target_index)
+
+        return target_image, target_motion
+
+    def get_uv(self, pos_data, intrinsic_matrix):
+        # transfer position data(based on motive coordinate) to camera coordinate
+        B, _ = pos_data.shape
+        z = np.repeat(pos_data[:, 2], 3).reshape((B,3))
+        pos_data = pos_data / z # u,v,1
+        uv_result = np.einsum('ij,bj->bi', intrinsic_matrix, pos_data)
+        return uv_result[:, :2]
+
+    def preprocess_uv(self, uv, image_size):
+        """
+        Preprocess includes
+        1. convert to torch.tensor
+        2. convert none to 0.
+        3. normalize uv from [0, image_size] to [-1, 1]
+        """
+        u, v = uv[:, 0], uv[:, 1]
+        h, w = image_size
+        u = (u / (w - 1) * 2) - 1
+        v = (v / (h - 1) * 2) - 1
+        uv = np.stack([u, v], 1)
+        return uv
+
+    def add_data(self, folder_path, cfg):
+        """
+        output:
+        data_list: list of data_dict
+        data_dict = {
+        'filename': str -> name of each data except file name extension. e.g. 00000
+        'image_dir': str -> path to image dir which includes rgb and depth images
+        'pickle_dir': str -> path to pickle dir.
+        'end_index': index of data when task will finish
+        'start_index': index of date when task started
+        'gripper_state_change': index of gripper state is changed. The value is 0 when the gripper state is not changed
+        }
+        next_index_list: If we set self.next_len > 1, next frame is set to current_index + self.next_len. However, if the next frame index skip the grassping frame, it is modified to the grassping frame.
+        index_list: this is used for index of __getitem__()
+        sequence_index_list: this list contains lists of [start_index of sequennce, end_index of sequence]. so sequence_index_list[0] returns start and end frame index of 0-th sequence.
+        """
+        # for data preparation
+        self.info_dict["data_list"] = []
+        self.info_dict["index_list"] = []
+        self.info_dict["sequence_index_list"] = []
+        index = 0
+        
+        task_name = "PickUp"
+        print(f"taskname: {task_name}")
+        task_path = os.path.join(folder_path, task_name)
+        
+        sequence_list = os.listdir(task_path)
+        sequence_list.sort()
+        
+        for sequence_index in tqdm(sequence_list):
+            sequence_path = os.path.join(task_path, sequence_index)
+            past_gripper_open = 100.0 # default gripper state is open. If not, please change
+
+            # Define joint names
+            data_dict = {}
+            data_dict['image_dir'] = sequence_path
+            data_dict['filename'] = sequence_index
+            data_dict['csv_path'] = os.path.join(sequence_path, "transformed_trajectory.csv")
+
+            # load pose
+            times, poses, rotations, gripper_states = [], [], [], []
+            with open(os.path.join(sequence_path, "transformed_trajectory.csv"), 'r') as csv_path:
+                reader = csv.reader(csv_path)
+
+                # Read and modify header
+                header = next(reader)
+
+                for row in reader:
+                    timestamp = float(row[0])
+
+                    left_position = list(map(float, row[1:4]))  # posx, posy, posz
+                    left_orientation = list(map(float, row[4:8]))  # qx, qy, qz, qw
+                    left_grip = float(row[8])  # Gripper position
+
+                    right_position = list(map(float, row[9:12]))  # posx, posy, posz
+                    right_orientation = list(map(float, row[12:16]))  # qx, qy, qz, qw
+                    right_grip = float(row[16])  # Gripper position
+
+                    times.append(timestamp)
+                    poses.append(right_position)
+                    rotations.append(right_orientation)
+
+                    if right_grip >= 50:
+                        right_grip = 1.0
+                    else:
+                        right_grip = 0.0
+                    gripper_states.append(right_grip)
+
+            times = np.array(times)
+            poses = np.array(poses)
+            rotations = R.from_quat(np.array(rotations))
+            gripper_states = np.array(gripper_states)
+
+            data_dict["times"] = times[:-self.cut_frames]
+            data_dict["poses"] = poses[:-self.cut_frames]
+            data_dict["rotations"] = rotations[:-self.cut_frames]
+            data_dict['start_index'] = 0
+            data_dict['end_index'] = len(times) - self.cut_frames
+            data_dict['gripper_state'] = gripper_states[:-self.cut_frames]
+
+            # get camera info
+            camera_intrinsic = np.load(os.path.join(sequence_path, 'camera_matrix.npy'))
+            data_dict["camera_intrinsic"] = camera_intrinsic
+
+            # image size
+            if index == 0:
+                rgb_path = os.path.join(sequence_path, "image.png")
+                rgb_image = Image.open(rgb_path)
+                image_size = rgb_image.size
+            self.info_dict["image_size"] = image_size
+
+            # get uv cordinate and pose image
+            uv = self.get_uv(poses[:-self.cut_frames], camera_intrinsic)
+            uv = self.preprocess_uv(uv, image_size)
+            data_dict['uvs'] = uv
+
+            self.info_dict["data_list"].append(data_dict)
+            index += 1
+    
+    def preprocess(self):
+        print("start preprocess")
+        self.info_dict["max_len"] = 0
+        self.info_dict["pos_curve_list"] = []
+        self.info_dict["rot_curve_list"] = []
+        self.info_dict["grasp_state_curve_list"] = []
+        self.info_dict["uv_curve_list"] = []
+        self.info_dict["z_curve_list"] = []
+
+
+        for i, data_dict in enumerate(self.info_dict["data_list"]):
+            print(f"{i}/{len(self.info_dict['data_list'])}")
+
+            if self.info_dict["max_len"] < data_dict['end_index']:
+                self.info_dict["max_len"] = data_dict['end_index']
+
+            time_batch = data_dict['times'] / data_dict['times'][-1]
+            pose_batch = data_dict['poses']
+            rotation_batch = np.array(data_dict['rotations'].as_matrix())
+            grasp_state_batch = np.array([data_dict['gripper_state']]).transpose((1,0))
+            uv_batch = np.array(data_dict['uvs'])
+            z_batch = pose_batch[:, 2:3]
+
+            pos_curve, rot_curve, grasp_curve, uv_curve, z_curve = self.get_spline_curve(time_batch, pose_batch, rotation_batch, grasp_state_batch, uv_batch, z_batch)
+            
+            self.info_dict["pos_curve_list"].append(pos_curve)
+            self.info_dict["rot_curve_list"].append(rot_curve)
+            self.info_dict["grasp_state_curve_list"].append(grasp_curve)
+            self.info_dict["uv_curve_list"].append(uv_curve)
+            self.info_dict["z_curve_list"].append(z_curve)
+
+    def get_vec_from_query(self, query):
+        """
+        query: dict
+        query["???"]: torch.array, shape:(Sequence_Length, Dim of ???), e.g, shape of query["pos"] = (101, 3)
+        """
+        pos = rearrange(query["pos"], "B S D -> B (S D)")
+        rot = rearrange(query["rotation"], "B S D -> B (S D)") * self.rotation_weight_for_retrieval
+        return torch.cat([pos, rot], 1)
+
+    def get_motion_from_index(self, data_index):
+
+        sequence_index_list = [i / self.num_frame for i in range(self.num_frame + 1)]
+        
+        pos = self.info_dict["pos_curve_list"][data_index](sequence_index_list).transpose((1,0))
+        
+        if self.rot_mode == "quat":
+            rot = self.info_dict["rot_curve_list"][data_index](sequence_index_list).as_quat()
+            rot = torch.tensor(rot, dtype=torch.float)
+        elif self.rot_mode == "euler":
+            rot = self.info_dict["rot_curve_list"][data_index](sequence_index_list).as_euler('zxy', degrees=True)
+            rot = torch.tensor(rot, dtype=torch.float)
+        elif self.rot_mode == "matrix":
+            rot = self.info_dict["rot_curve_list"][data_index](sequence_index_list).as_matrix()
+            rot = torch.tensor(rot, dtype=torch.float)
+        elif self.rot_mode == "6d":
+            rot = self.info_dict["rot_curve_list"][data_index](sequence_index_list).as_matrix()
+            rot = matrix_to_rotation_6d(torch.tensor(rot, dtype=torch.float))
+        else:
+            raise ValueError("invalid mode for get_gripper")
+        
+        grasp = self.info_dict["grasp_state_curve_list"][data_index](sequence_index_list).transpose((1,0))
+        uv = self.info_dict["uv_curve_list"][data_index](sequence_index_list).transpose((1,0))
+        z = self.info_dict["z_curve_list"][data_index](sequence_index_list).transpose((1,0))
+        
+        action_dict = {}
+        if "pos" in self.key_list:
+            action_dict["pos"] = torch.tensor(pos, dtype=torch.float)
+        if "rotation" in self.key_list:
+            action_dict["rotation"] = rot
+        if "grasp_state" in self.key_list:
+            action_dict["grasp_state"] = torch.tensor(grasp, dtype=torch.float)
+        if "uv" in self.key_list:
+            action_dict["uv"] = torch.tensor(uv, dtype=torch.float)
+        if "z" in self.key_list:
+            action_dict["z"] = torch.tensor(z, dtype=torch.float)
+        if "time" in self.key_list:
+            action_dict["time"] = torch.unsqueeze(torch.tensor(sequence_index_list, dtype=torch.float), 1)
+
+        return action_dict
+
+    def get_image_from_index(self, index):
+        # get image
+        if self.without_img == False:
+            rgb_path = os.path.join(self.info_dict["data_list"][index]['image_dir'], "image.png")
+            rgb_image = Image.open(rgb_path)
+            if (self.mode == "train") and self.aug_flag:
+                rgb_image = np.array(rgb_image)
+                rgb_image = Image.fromarray(self.img_aug(image=rgb_image))
+            rgb_image = rgb_image.resize((int(rgb_image.width*self.image_size), int(rgb_image.height*self.image_size)))
+            image = self.ToTensor(rgb_image)
+        else:
+            image = torch.zeros(1)
+        
+        return image
+    
+    def get_spline_curve(self, time_batch, pose_batch, rotation_batch, grasp_state_batch, uv_batch, z_batch):
+        pose_batch = pose_batch.transpose((1,0))
+        pos_curve = interpolate.interp1d(time_batch, pose_batch, kind="cubic", fill_value="extrapolate")
+        # interpolated_pos = pos_curve(output_time).transpose((1,0))
+
+        
+        query_rot = R.from_matrix(rotation_batch)
+        rot_curve = RotationSpline(time_batch, query_rot)
+        # interpolated_rot = spline(output_time).as_matrix()
+
+        grasp_state_batch = grasp_state_batch.transpose((1,0))
+        grasp_curve = interpolate.interp1d(time_batch, grasp_state_batch, fill_value="extrapolate")
+
+        
+        uv_batch = uv_batch.transpose((1,0))
+        uv_curve = interpolate.interp1d(time_batch, uv_batch, kind="cubic", fill_value="extrapolate")
+
+        z_batch = z_batch.transpose((1,0))
+        z_curve = interpolate.interp1d(time_batch, z_batch, kind="cubic", fill_value="extrapolate")
+        
+        return pos_curve, rot_curve, grasp_curve, uv_curve, z_curve
+
+
+class Baxter_Retrieval(Baxter_Demos):
+
+    def __init__(self, mode, cfg, save_dataset=False, debug=False, num_frame=100, image_size=1/5,
+                rot_mode="6d", img_aug=True, keys=["pos","uv","z","rotation","grasp_state","time"], r_weight=0.1, temperature=1.0, rank=3):
+
+        # set dataset root
+        if cfg.DATASET.NAME == "Baxter":
+            self.data_root_dir = os.path.join(cfg.DATASET.BAXTER.PATH, mode)
+        else:
+            raise ValueError("Invalid dataset name")
+        
+        self.cfg = cfg
+        self.debug = debug
+        self.num_frame = num_frame
+        self.rot_mode = rot_mode
+        self.key_list = keys
+        self.seed = 0
+        self.cut_frames = 240
+        self.mode = mode
+        random.seed(self.seed)
+
+        self.ToTensor = torchvision.transforms.ToTensor()
+
+        self.without_img = False
+        self.aug_flag = img_aug
+        self.img_aug = iaa.OneOf([
+                        iaa.AdditiveGaussianNoise(scale=0.05*255),
+                        iaa.JpegCompression(compression=(30, 70)),
+                        iaa.WithBrightnessChannels(iaa.Add((-40, 40))),
+                        iaa.AverageBlur(k=(2, 5)),
+                        iaa.CoarseDropout(0.02, size_percent=0.5),
+                        iaa.Identity()
+                    ])
+        self.image_size = image_size
+
+        # retrieval config
+        self.rank = rank
+        self.rotation_weight_for_retrieval = r_weight
+        self.temperature = temperature
+        self.softmax = torch.nn.Softmax(dim=0)
+
+        self.info_dict = {}
+        self._pickle_file_name = '{}_{}_Retrieval.pickle'.format(cfg.DATASET.NAME,mode)
+        self._pickle_path = os.path.join(self.data_root_dir, 'pickle', self._pickle_file_name)
+        if not os.path.exists(self._pickle_path) or save_dataset:
+            # create dataset
+            print('There is no pickle data')
+            print('create pickle data')
+            self.add_data(self.data_root_dir, cfg)
+            self.preprocess()
+            vecs = self.get_all_vec()
+            sorted_distances, sorted_indices = self.setup_retrieval(vecs)
+            self.info_dict["sorted_distances"] = sorted_distances[:,1:]
+            self.info_dict["sorted_indices"] = sorted_indices[:,1:]
+            print('done')
+            
+            # save json data
+            print('save pickle data')
+            os.makedirs(os.path.join(self.data_root_dir, 'pickle'), exist_ok=True)
+            with open(self._pickle_path, mode='wb') as f:
+                pickle.dump(self.info_dict,f)
+            print('done')
+        else:
+            # load json data
+            print('load pickle data')
+            with open(self._pickle_path, mode='rb') as f:
+                self.info_dict = pickle.load(f)
+            print('done')
+        self.vecs = None
+        self.all_query = None
+
+    def __len__(self):
+        return len(self.info_dict["data_list"])
+
+    def __getitem__(self, index):
+        """
+        Return:
+        target_image (torch.tensor: B C H W)
+        target_motion (dict): Components of this dictionary are determined by self.keys
+            key: "pos", value: torch.tensor B(batch) S(sequence length) 3(dim); position of robot hand in camera coordinate system
+            key: "uv", value: torch.tensor B(batch) S(sequence length) 2(dim); position of robot hand in image coordinate system 
+            key: "z", value: torch.tensor B S 1; depth of robot hand in camera coordinate system
+            key: "rotation", value: torch.tensor B S D(depends on representation. 6d->6)
+            key: "grasp_state", value: torch.tensor B S 1
+        positive_image (or motion); positive means this image (or motion) is similar to target image (or motion).
+        negative_image (or motion); negative means this image (or motion) is far from target image (or motion).
+        """
+        target_index = index
+        target_image = self.get_image_from_index(target_index)
+        target_motion = self.get_motion_from_index(target_index)
+
+        positive_index = self.info_dict["sorted_indices"][target_index, random.randint(0, self.rank-1)]
+        positive_image = self.get_image_from_index(positive_index)
+        positive_motion = self.get_motion_from_index(positive_index)
+
+        return target_image, target_motion, positive_image, positive_motion, torch.zeros(1), torch.zeros(1)
+
+    def retrieve_k_sample(self, target_query, k=8):
+        # set database
+        if self.all_query == None:
+            self.vecs = self.get_all_vec()
+            self.prepare_database_for_retrieval()
+
+        # compute vec to get kNN sample
+        if "pos" not in target_query.keys():
+            target_query = get_pos(target_query, self.info_dict["data_list"][0]["camera_intrinsic"])
+        target_vecs = self.get_vec_from_query(target_query)
+        device = target_vecs.device
+        B, _ = target_vecs.shape
+
+        # compute distances
+        distances = torch.cdist(target_vecs, self.vecs.to(device))
+        sorted_distances, sorted_indices = torch.sort(distances, dim=1)
+
+        near_queries = {}
+        for key in self.all_query.keys():
+            _, S, D = self.all_query[key].shape
+            index_nears = repeat(sorted_indices[:, k-1], "B -> B S D",S=S,D=D)
+            near_queries[key] = torch.gather(self.all_query[key].to(device), 0, index_nears)
+
+        imgs = [self.get_image_from_index(sorted_indices[index, k-1]) for index in range(B)]
+        imgs = torch.stack(imgs, 0)
+        return imgs, near_queries
+    
+    def get_all_vec(self):
+        print("loading dataset")
+        all_query = {}
+        temp_key = copy.deepcopy(self.key_list)
+        self.key_list = ["pos", "rotation"]
+        for i in tqdm(range(self.__len__())):
+            query = self.get_motion_from_index(i)
+            if i == 0:
+                for key in query.keys():
+                    all_query[key] = torch.unsqueeze(query[key], 0)
+            else:
+                for key in query.keys():
+                    all_query[key] = torch.cat([all_query[key], torch.unsqueeze(query[key], 0)], 0)
+                    
+        all_vec = self.get_vec_from_query(all_query)
+        self.key_list = temp_key
+        return all_vec
+    
+    def prepare_database_for_retrieval(self):
+        print("prepare database for retrieval")
+        all_query = {}
+        for i in tqdm(range(self.__len__())):
+            query = self.get_motion_from_index(i)
+            if i == 0:
+                for key in query.keys():
+                    all_query[key] = torch.unsqueeze(query[key], 0)
+            else:
+                for key in query.keys():
+                    all_query[key] = torch.cat([all_query[key], torch.unsqueeze(query[key], 0)], 0)
+        self.all_query = all_query
+
+    def setup_retrieval(self, vecs):
+        distances = torch.cdist(vecs, vecs)
+        sorted_distances, sorted_indices = torch.sort(distances, dim=1)
+        return sorted_distances, sorted_indices

@@ -13,7 +13,7 @@ sys.path.append("../")
 
 from pycode.READ.vae import VAE_Loss, Single_Class_TransformerVAE, Multi_Latent_TransformerVAE
 from pycode.misc import str2bool, save_checkpoint, Time_memo, save_args, get_pos, visualize_multi_query_pos
-from pycode.dataset import RLBench_DMOEBM
+from pycode.dataset import RLBench_DMOEBM, Baxter_Demos
 from pycode.config import _C as cfg
 
 ##### parser #####
@@ -58,7 +58,7 @@ batch_size = cfg.DATASET.BATCH_SIZE
 input_keys = ["uv","z","rotation","grasp_state"]
 input_dims = [2, 1, 6, 1]
 
-save_dir = os.path.join(cfg.OUTPUT.BASE_DIR, cfg.DATASET.NAME, cfg.DATASET.RLBENCH.TASK_NAME)
+save_dir = os.path.join(cfg.OUTPUT.BASE_DIR, cfg.DATASET.NAME)
 save_path = os.path.join(save_dir, dir_name)
 print(f"save path:{save_path}")
 # os.makedirs(save_path, exist_ok=True)
@@ -95,11 +95,18 @@ argsfile_path = os.path.join(save_path, "args.json")
 save_args(args,argsfile_path)
 
 # set dataset
-train_dataset  = RLBench_DMOEBM("train", cfg, save_dataset=args.reset_dataset, num_frame=args.frame, rot_mode=rot_mode, keys=input_keys)
+if cfg.DATASET.NAME == "RLBench":
+    dataclass = RLBench_DMOEBM
+elif cfg.DATASET.NAME == "Baxter":
+    dataclass = Baxter_Demos
+else:
+    raise ValueError("Invalid dataset name")
+
+train_dataset  = dataclass("train", cfg, save_dataset=args.reset_dataset, num_frame=args.frame, rot_mode=rot_mode, keys=input_keys)
 train_dataset.without_image = True
 train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
 
-val_dataset = RLBench_DMOEBM("val", cfg, save_dataset=args.reset_dataset, num_frame=args.frame, rot_mode=rot_mode, keys=input_keys)
+val_dataset = dataclass("val", cfg, save_dataset=args.reset_dataset, num_frame=args.frame, rot_mode=rot_mode, keys=input_keys)
 val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=100, shuffle=False, num_workers=8)
     
 # set model
@@ -107,7 +114,7 @@ input_size = 10 * (args.frame + 1)
 model = Single_Class_TransformerVAE(input_keys, input_dims, args.frame + 1, latent_dim=cfg.VAE.LATENT_DIM, intrinsic=train_dataset.info_dict["data_list"][0]["camera_intrinsic"]).to(device)
 # model = Multi_Latent_TransformerVAE(input_keys, input_dims, args.frame + 1, latent_dim=cfg.VAE.LATENT_DIM, intrinsic=train_dataset.info_dict["data_list"][0]["camera_intrinsic"]).to(device)
 
-temp_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1000, num_workers=2, shuffle=False)
+# temp_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1000, num_workers=2, shuffle=False)
 vae_loss = VAE_Loss(rot_mode=rot_mode, kld_weight=cfg.VAE.KLD_WEIGHT)
 
 loss_hist = np.array([])

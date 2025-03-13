@@ -11,7 +11,7 @@ import wandb
 
 sys.path.append("../")
 from pycode.config import _C as cfg
-from pycode.dataset import RLBench_Retrieval
+from pycode.dataset import RLBench_Retrieval, Baxter_Retrieval
 from pycode.misc import str2bool, save_checkpoint, save_args, load_checkpoint
 from pycode.READ.model import SPE_Continuous_Latent_Diffusion, Timm_Continuous_Latent_Diffusion, AvgPool_Continuous_Latent_Diffusion, ConvPool_Continuous_Latent_Diffusion
 from pycode.READ.vae import Single_Class_TransformerVAE
@@ -75,7 +75,11 @@ else:
 if args.add_name != "":
     dir_name = f"{dir_name}_{args.add_name}"
 
-save_dir = os.path.join(cfg.OUTPUT.BASE_DIR, cfg.DATASET.NAME, cfg.DATASET.RLBENCH.TASK_NAME)
+if cfg.DATASET.NAME == "RLBench":
+    save_dir = os.path.join(cfg.OUTPUT.BASE_DIR, cfg.DATASET.NAME, cfg.DATASET.RLBENCH.TASK_NAME)
+elif cfg.DATASET.NAME == "Baxter":
+    save_dir = os.path.join(cfg.OUTPUT.BASE_DIR, cfg.DATASET.NAME)
+
 save_path = os.path.join(save_dir, dir_name)
 print(f"save path:{save_path}")
 if os.path.exists(save_path):
@@ -118,15 +122,25 @@ argsfile_path = os.path.join(save_path, "args.json")
 save_args(args,argsfile_path)
 
 # set dataset
-train_dataset  = RLBench_Retrieval("train", cfg, save_dataset=args.reset_dataset, num_frame=args.frame, rot_mode=rot_mode, keys=input_keys, rank=cfg.RETRIEVAL.RANK)
+if cfg.DATASET.NAME == "RLBench":
+    dataclass = RLBench_Retrieval
+elif cfg.DATASET.NAME == "Baxter":
+    dataclass = Baxter_Retrieval
+else:
+    raise ValueError("Invalid dataset name")
+
+train_dataset  = dataclass("train", cfg, save_dataset=args.reset_dataset, num_frame=args.frame, rot_mode=rot_mode, keys=input_keys, rank=cfg.RETRIEVAL.RANK)
 train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
 
-val_dataset = RLBench_Retrieval("val", cfg, save_dataset=args.reset_dataset, num_frame=args.frame, rot_mode=rot_mode, keys=input_keys, rank=cfg.RETRIEVAL.RANK)
+val_dataset = dataclass("val", cfg, save_dataset=args.reset_dataset, num_frame=args.frame, rot_mode=rot_mode, keys=input_keys, rank=cfg.RETRIEVAL.RANK)
 val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, num_workers=8)
 
 # set vae
 if args.vae_path == "":
-    vae_path = f"../weights/{cfg.DATASET.NAME}/{cfg.DATASET.RLBENCH.TASK_NAME}/ACTOR_frame_{args.frame}_latentdim_{cfg.VAE.LATENT_DIM}_KLD_{cfg.VAE.KLD_WEIGHT}/model/model_iter50000.pth"
+    if cfg.DATASET.NAME == "RLBench":
+        vae_path = f"../weights/{cfg.DATASET.NAME}/{cfg.DATASET.RLBENCH.TASK_NAME}/ACTOR_frame_{args.frame}_latentdim_{cfg.VAE.LATENT_DIM}_KLD_{cfg.VAE.KLD_WEIGHT}/model/model_iter50000.pth"
+    elif cfg.DATASET.NAME == "Baxter":
+        vae_path = f"../weights/{cfg.DATASET.NAME}/ACTOR_frame_{args.frame}_latentdim_{cfg.VAE.LATENT_DIM}_KLD_{cfg.VAE.KLD_WEIGHT}/model/model_iter10000.pth"
 else:
     vae_path = args.vae_path
 
@@ -153,10 +167,15 @@ query_emb_dim = cfg.MODEL.QUERY_EMB_DIM
 
 vae_latent_dim = cfg.VAE.LATENT_DIM
 
+if cfg.DATASET.NAME == "RLBench":
+    channel_dim = 4
+else:
+    channel_dim = 3
+
 if model_name == "Convnext-UNet":
     model = SPE_Continuous_Latent_Diffusion(input_keys, input_dims, vae, vae_latent_dim, inout_type,
                     dims=conv_dims, enc_depths=enc_depths, enc_layers=enc_layers, dec_depths=dec_depths, dec_layers=dec_layers, 
-                    query_emb_dim=query_emb_dim, drop_path_rate=conv_droppath_rate)
+                    query_emb_dim=query_emb_dim, drop_path_rate=conv_droppath_rate, input_dim=channel_dim)
 elif model_name == "Convnext-UNet-avgpool":
     model = AvgPool_Continuous_Latent_Diffusion(input_keys, input_dims, vae, vae_latent_dim, inout_type,
                     dims=conv_dims, enc_depths=enc_depths, enc_layers=enc_layers, dec_depths=dec_depths, dec_layers=dec_layers, 

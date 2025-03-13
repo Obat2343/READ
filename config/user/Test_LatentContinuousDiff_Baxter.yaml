@@ -1,0 +1,8 @@
+SDE:
+  N: 100
+  SAMPLING:
+    METHOD: "pc"
+    PREDICTOR: "cold_diffusion" # cold_diffusion euler_maruyama
+    PROBABILITY_FLOW: False
+RETRIEVAL:
+  RANK: 1

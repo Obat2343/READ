@@ -1,0 +1,37 @@
+DATASET:
+  NAME: "Baxter"
+  BATCH_SIZE: 5
+OUTPUT:
+  LOG_ITER: 100
+  EVAL_ITER: 1000
+  MAX_ITER: 30000
+  SAVE_ITER: 5000
+  BASE_DIR: "../weights"
+OPTIM:
+  LR: 1e-4
+  SCHEDULER:
+    GAMMA: 0.99
+    STEP: 1000
+MODEL:
+  NAME: "Convnext-UNet" # Convnext-UNet, resnet18, vit_base_patch16_224, Convnext-UNet-avgpool
+  INOUT: "l-m"
+  QUERY_EMB_DIM: 128
+  TARGET: "gt_motion" # noise gt_motion
+SDE:
+  NAME: "irsde"
+  N: 100
+  VPSDES:
+    BETA_MIN: 1.
+    BETA_MAX: 20.
+  VESDES:
+    SIGMA_MIN: 0.01
+    SIGMA_MAX: 90.0 # 90.0
+  IRSDES:
+    THETA: 0.1
+    LAMDA: 0.5
+  TRAINING:
+    CONTINUOUS: True
+RETRIEVAL:
+  RANK: 3
+NOISE:
+  NAME: "gaussian"
