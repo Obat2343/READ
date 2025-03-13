@@ -33,7 +33,7 @@ parser = argparse.ArgumentParser(description='parser for image generator')
 parser.add_argument('--model_path', type=str, required=True)
 parser.add_argument('--vae_path', type=str, default="")
 parser.add_argument('--inf_method', type=str, required=True) # random, reconstruct, retrieve_from_SPE, retrieve_from_CLIP, retrieve_from_BYOL_wo_crop, retrieve_from_SPE_wo_modification
-parser.add_argument('--result_dirname', type=str, default="")
+parser.add_argument('--result_path', type=str, default="")
 parser.add_argument('--add_name', type=str, default="")
 parser.add_argument('--image_path', type=str, default="")
 parser.add_argument('--device', type=str, default='cuda')
@@ -147,17 +147,18 @@ else:
 cfg.merge_from_file(args.config_path)
 
 model_name_path = model_path[:model_path.find("/model/")]
-result_base_path = os.path.join(model_name_path, "result")
-os.makedirs(result_base_path, exist_ok=True)
 
 # set inference_config
 shape_dict = {"latent": (1, cfg.VAE.LATENT_DIM)}
 inverse_scaler = torch.nn.Identity()
 sampling_fn = sampling.get_sampling_fn(cfg, sde, shape_dict, inverse_scaler, sampling_eps, noise_sampler=noise_sample_func)
 
-if args.result_dirname != "":
-    result_dir_name = args.result_dirname
+if args.result_path != "":
+    result_path = args.result_path
 else:
+    result_base_path = os.path.join(model_name_path, "result")
+    os.makedirs(result_base_path, exist_ok=True)
+
     if "retrieve" in inference_method:
         result_dir_name = f"{inference_method}_top{cfg.RETRIEVAL.RANK}_{sde_name}_{cfg.SDE.SAMPLING.METHOD}"
     else:
@@ -166,11 +167,12 @@ else:
     if cfg.SDE.SAMPLING.METHOD == "pc":
         result_dir_name = f"{result_dir_name}_{cfg.SDE.SAMPLING.PREDICTOR}_{cfg.SDE.SAMPLING.CORRECTOR}"
 
-if args.add_name != "":
-    result_dir_name = f"{result_dir_name}_{args.add_name}"
+    if args.add_name != "":
+        result_dir_name = f"{result_dir_name}_{args.add_name}"
 
-print(result_dir_name)
-result_path = os.path.join(result_base_path, result_dir_name)
+    result_path = os.path.join(result_base_path, result_dir_name)
+
+print(f"save to {result_path}")
 
 if os.path.exists(result_path):
     print(result_path)
@@ -204,7 +206,8 @@ elif args.image_path == "debug":
 else:
     image = Image.open(args.image_path)
     image = torchvision.transforms.ToTensor()(image)
-    camera_intrinsic = train_dataset.info_dict["data_list"][0]["camera_intrinsic"]
+
+    camera_intrinsic = np.load(os.path.join(os.path.dirname(args.image_path), 'camera_matrix.npy'))
 image = torch.unsqueeze(image, 0)
 image = image.to(device)
 
