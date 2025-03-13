@@ -69,7 +69,7 @@ frame = arg_info["frame"]
 
 cfg.merge_from_file(model_config_path)
 cfg.DATASET.BAXTER.PATH = os.path.abspath('../dataset/baxter_demos')
-train_dataset  = Baxter_Demos("train", cfg, save_dataset=False, num_frame=frame, rot_mode=rot_mode, keys=input_keys)
+train_dataset  = Baxter_Demos("train", cfg, save_dataset=True, num_frame=frame, rot_mode=rot_mode, keys=input_keys)
 
 # set vae
 if args.vae_path == "":

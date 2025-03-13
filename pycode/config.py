@@ -26,10 +26,10 @@ _C.DATASET.IMAGE_SIZE = 256
 ### RLBENCH ###
 _C.DATASET.RLBENCH = CN()
 _C.DATASET.RLBENCH.TASK_NAME = 'PickUpCup' # e.g. 'CloseJar', 'PickUpCup'
-_C.DATASET.RLBENCH.PATH = os.path.abspath('../dataset/RLBench-Local') # '../dataset/RLBench-Local'
+_C.DATASET.RLBENCH.PATH = '../dataset/RLBench-Local' # '../dataset/RLBench-Local'
 
 _C.DATASET.BAXTER = CN()
-_C.DATASET.BAXTER.PATH = os.path.abspath('../dataset/baxter_demos') # '../dataset/RLBench-Local'
+_C.DATASET.BAXTER.PATH = '../dataset/baxter_demos' # '../dataset/RLBench-Local'
 
 #################
 ##### NOISE #####
