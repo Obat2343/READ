@@ -232,12 +232,13 @@ if "retrieve" in inference_method:
     if "retrieve_from_motion" in inference_method:
         near_queries = Retriever.retrieve_k_sample(query, k=k)[0]
     else:
-        near_queries = Retriever.retrieve_k_sample(image)[0]
+        near_queries, nears = Retriever.retrieve_k_sample(image)[:2]
 
     retrieved_query = {}
     for key in near_queries.keys():
         retrieved_query[key] = near_queries[key][:,cfg.RETRIEVAL.RANK-1].to(device)
     
+    print(f"index: {nears[:,cfg.RETRIEVAL.RANK-1]}")
     retrieved_query_copy = copy.deepcopy(retrieved_query)
     if "wo_modification" in inference_method:
         pred_action = retrieved_query
@@ -246,8 +247,8 @@ if "retrieve" in inference_method:
         pred_action, n = sampling_fn(model, x=retrieved_query, condition=image, N=cfg.SDE.N)
         print("done")
 
-    pred_action = get_pos(pred_action, camera_intrinsic, (1280, 800))
-    retrieved_query_copy = get_pos(retrieved_query_copy, camera_intrinsic, (1280, 800))
+    pred_action = get_pos(pred_action, camera_intrinsic, (800, 1280))
+    retrieved_query_copy = get_pos(retrieved_query_copy, camera_intrinsic, (800, 1280))
 else:
     raise ValueError("Invalid method")
 print("prediction end")
@@ -268,7 +269,7 @@ if "retrieve" in inference_method:
         for key in near_queries.keys():
             temp[key] = near_queries[key][:,rank_index]
         near_query_list.append(temp)
-    near_query_list = [get_pos(temp_query, camera_intrinsic, (1280, 800)) for temp_query in near_query_list]
+    near_query_list = [get_pos(temp_query, camera_intrinsic, (800, 1280)) for temp_query in near_query_list]
     nears_img = visualize_multi_query_pos(image, near_query_list, camera_intrinsic, rot_mode=rot_mode)
     nears_img.save(os.path.join(result_motion_path, f"retrieved_motion.png"))
 
@@ -279,9 +280,9 @@ else:
 vis_img.save(os.path.join(result_motion_path, f"pred_motion.png"))
 
 # save 
-pred_query = {}
 for key in pred_action.keys():
-    pred_query[key] = pred_action[key].cpu()
+    pred_action[key] = pred_action[key].cpu()
+    retrieved_query_copy[key] = retrieved_query_copy[key].cpu()
 
 
 def rotation_6d_to_matrix(d6: torch.Tensor) -> torch.Tensor:
@@ -308,53 +309,46 @@ def rotation_6d_to_matrix(d6: torch.Tensor) -> torch.Tensor:
     b3 = torch.cross(b1, b2, dim=-1)
     return torch.stack((b1, b2, b3), dim=-2)
 
-def denorm_uv(uv, image_size):
-    """
-    Preprocess includes
-    1. denormalize uv from [-1, 1] to [0, image_size]
-    """
-    u, v = uv[:,:,0], uv[:,:,1]
-
-    h, w = image_size
-
-    denorm_u = (u + 1) / 2 * (w - 1)
-    denorm_v = (v + 1) / 2 * (h - 1)
-
-    denorm_uv = torch.stack([denorm_u, denorm_v], dim=(uv.dim()-1))
-    return denorm_uv
-
-def output2baxter_action(pred_query, image_size=(800, 1200), end_time=12., default_left_pose=[-96.52, 984.35, 0.4229, -0.2069,-0.5902,0.7237,-0.2917, 0.]):
+def output2baxter_action(query, image_size=(800, 1280), end_time=12., default_left_pose=[-96.52, 984.35, 0.4229, -0.2069,-0.5902,0.7237,-0.2917, 0.]):
     # convert uv range from [-1,1] to [0, H or W]
-    right_uv = denorm_uv(pred_query["uv"], image_size)
+    uv = query["uv"]
+    h, w = image_size
+    u, v = uv[:,:,0], uv[:,:,1]
+    u = (u + 1) / 2 * (w - 1)
+    v = (v + 1) / 2 * (h - 1)
+    right_uv = torch.stack([u, v], 2)
 
     # convert grasping value range 
-    right_grasp = pred_query["grasp_state"] * 100
+    right_grasp = query["grasp_state"] * 100
     right_grasp = torch.clamp(right_grasp, min=0, max=100)
 
     # convert rotation 6d to quat
-    right_rot = rotation_6d_to_matrix(pred_query["rotation"])
+    right_rot = rotation_6d_to_matrix(query["rotation"])
     right_rot = R.from_matrix(right_rot[0].numpy())
     right_rot = torch.unsqueeze(torch.tensor(np.array(right_rot.as_quat())), 0)
     
     # get time_value
-    _, S, _ = pred_query["uv"].shape
+    _, S, _ = query["uv"].shape
     time = torch.arange(0, S) * end_time / (S-1)
     time = repeat(time, "S -> B S D", B=1, D=1)
 
     # concat time, default_left_pose, predicted_right_pose
     left_pose = repeat(torch.tensor(default_left_pose), "D -> B S D", B=1, S=S)
-    action = torch.cat([time, left_pose, right_uv, pred_query["z"], right_rot, right_grasp], 2)[0]
+    action = torch.cat([time, left_pose, right_uv, query["z"], right_rot, right_grasp], 2)[0]
     return action.numpy()
 
-action_array = output2baxter_action(pred_query)
+action_array = output2baxter_action(pred_action)
+retrieved_array = output2baxter_action(retrieved_query_copy)
 
 # save_result
 print("save_result to csv")    
-csv_path = os.path.join(result_path, "pred_trajectory.csv")
+action_csv_path = os.path.join(result_path, "pred_trajectory.csv")
+retrieval_csv_path = os.path.join(result_path, "retrieved_trajectory.csv")
 # head_list = ["Time", "left_u", "left_v", "left_z", "left_qx", "left_qy", "left_qz", "left_qw", "left_grip", "right_u", "right_v", "right_z", "right_qx", "right_qy", "right_qz", "right_qw", "right_grip"]
 header = "Time,left_u,left_v,left_z,left_qx,left_qy,left_qz,left_qw,left_grip,right_u,right_v,right_z,right_qx,right_qy,right_qz,right_qw,right_grip"
 
-np.savetxt(csv_path, action_array, delimiter=",", fmt="%.4f", header=header, comments="")
+np.savetxt(action_csv_path, action_array, delimiter=",", fmt="%.4f", header=header, comments="")
+np.savetxt(retrieval_csv_path, retrieved_array, delimiter=",", fmt="%.4f", header=header, comments="")
 
 # with open(csv_path, 'w') as f:
 #     writer = csv.writer(f)

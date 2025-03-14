@@ -983,7 +983,8 @@ class Baxter_Demos(torch.utils.data.Dataset):
             if index == 0:
                 rgb_path = os.path.join(sequence_path, "image.png")
                 rgb_image = Image.open(rgb_path)
-                image_size = rgb_image.size
+                W, H = rgb_image.size
+                image_size = (H, W)
             self.info_dict["image_size"] = image_size
 
             # get uv cordinate and pose image
