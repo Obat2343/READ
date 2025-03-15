@@ -69,7 +69,7 @@ frame = arg_info["frame"]
 
 cfg.merge_from_file(model_config_path)
 cfg.DATASET.BAXTER.PATH = os.path.abspath('../dataset/baxter_demos')
-train_dataset  = Baxter_Demos("train", cfg, save_dataset=True, num_frame=frame, rot_mode=rot_mode, keys=input_keys)
+train_dataset  = Baxter_Demos("train", cfg, save_dataset=True, num_frame=frame, rot_mode=rot_mode, keys=input_keys, img_aug=False)
 
 # set vae
 if args.vae_path == "":
@@ -205,6 +205,7 @@ elif args.image_path == "debug":
     camera_intrinsic = train_dataset.info_dict["data_list"][0]["camera_intrinsic"]
 else:
     image = Image.open(args.image_path)
+    image.resize((int(image.width/5), int(image.height/5)))
     image = torchvision.transforms.ToTensor()(image)
 
     camera_intrinsic = np.load(os.path.join(os.path.dirname(args.image_path), 'camera_matrix.npy'))
@@ -309,7 +310,7 @@ def rotation_6d_to_matrix(d6: torch.Tensor) -> torch.Tensor:
     b3 = torch.cross(b1, b2, dim=-1)
     return torch.stack((b1, b2, b3), dim=-2)
 
-def output2baxter_action(query, image_size=(800, 1280), end_time=12., default_left_pose=[-96.52, 984.35, 0.4229, -0.2069,-0.5902,0.7237,-0.2917, 0.]):
+def output2baxter_action(query, image_size=(800, 1280), end_time=20., default_left_pose=[-96.52, 984.35, 0.4229, -0.2069,-0.5902,0.7237,-0.2917, 0.]):
     # convert uv range from [-1,1] to [0, H or W]
     uv = query["uv"]
     h, w = image_size

@@ -57,7 +57,7 @@ if args.name == "":
     elif cfg.MODEL.INOUT == "m":
         READ_type = "_O"
     elif cfg.MODEL.INOUT == "l-m-l":
-        READ_type == "_L"
+        READ_type = "_L"
 
     if cfg.NOISE.NAME == "gaussian":
         dir_name = f"READ{READ_type}_rank_{cfg.RETRIEVAL.RANK}_VAEdim_{cfg.VAE.LATENT_DIM}_frame_{args.frame}"
@@ -103,7 +103,12 @@ else:
 
 if not args.debug:
     wandb.login()
-    run = wandb.init(project='Latent_Diffusion', group=cfg.DATASET.RLBENCH.TASK_NAME,
+    if cfg.DATASET.NAME == "RLBench":
+        group = cfg.DATASET.RLBENCH.TASK_NAME
+    else:
+        group = "PickUp" # TODO change here if you are trying a different task.
+
+    run = wandb.init(project='Latent_Diffusion', group=group,
                     config=obj, save_code=True, name=dir_name, dir=save_dir)
 
 model_save_dir = os.path.join(save_path, "model")
