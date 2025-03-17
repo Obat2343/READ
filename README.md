@@ -24,6 +24,14 @@ python create_dataset.py --task_list TaskA TaskB
 
 ***
 
+For TTI-IIM students
+```
+mkdir dataset
+cd dataset
+ln -s /misc/dl001/dataset/ooba/RLBench4 .
+ln -s /misc/dl001/dataset/ooba/RLBench4-panda RLBench-test
+```
+
 ### Train
 
 Please train a VAE first.

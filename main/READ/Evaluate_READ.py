@@ -152,7 +152,7 @@ for task_index, task_name in enumerate(args.tasks):
     val_dataset = RLBench_DMOEBM(mode, cfg, save_dataset=False, num_frame=frame, rot_mode=rot_mode, keys=input_keys)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=8)
 
-    cfg.DATASET.RLBENCH.PATH = os.path.abspath('../dataset/RLBench4')
+    cfg.DATASET.RLBENCH.PATH = os.path.abspath('../dataset/RLBench')
     train_dataset  = RLBench_DMOEBM("train", cfg, save_dataset=False, num_frame=frame, rot_mode=rot_mode, keys=input_keys)
     
     # set vae
